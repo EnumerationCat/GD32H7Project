@@ -114,6 +114,13 @@ int bootloader_app_is_valid(uint32_t image_base, uint32_t *app_base)
         return 0;
     }
 
+    /* ARMv7-M：向量表必须按"异常个数向上取整到 2 的幂"对齐。
+       App 的表 0x3A4 字节 -> 1024 字节（不是 128！只做 128 对齐时，
+       外部中断取向量会落到错误的表项，186 号 IRQ 会取到 0 -> HardFault） */
+    if(0U != (load & 0x3FFU)) {
+        return 0;
+    }
+
     /* 入口点须在 App 的 Flash 区间内，且末位为 1（Thumb 位） */
     if((ep < load) || (ep >= FLASH_END_ADDR)) {
         return 0;
@@ -165,8 +172,10 @@ void bootloader_jump_to_app(uint32_t app_base)
     __DSB();
     __ISB();
 
-    /* 设置 App 栈顶后跳转（bx 保证不再访存本栈） */
+    /* 设置 App 栈顶后跳转（bx 保证不再访存本栈）。
+       最后恢复 PRIMASK：App 按复位后的默认状态运行，FreeRTOS 依赖中断启动调度器 */
     __set_MSP(sp);
+    __enable_irq();
     __ASM volatile("bx %0" : : "r"(pc));
 
     for(;;) {

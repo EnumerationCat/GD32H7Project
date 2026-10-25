@@ -70,6 +70,7 @@ void timerx_int_init(uint64_t arr, uint16_t psc)
  */
 
 volatile unsigned long ulHighFrequencyTimerTicks;
+volatile uint32_t g_timer_isr_count;
 
 void TIMERX_INT_IRQHandler(void)
 {
@@ -78,8 +79,9 @@ void TIMERX_INT_IRQHandler(void)
 		//LED1_TOGGLE();
 
 		ulHighFrequencyTimerTicks++;
+		g_timer_isr_count++;
 
-    
+
         timer_interrupt_flag_clear(TIMERX_INT, TIMER_INT_FLAG_UP);          /* 清除定时器更新中断标志 */
     }
 }

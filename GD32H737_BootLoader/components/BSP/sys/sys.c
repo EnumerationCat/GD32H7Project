@@ -62,14 +62,24 @@ void sys_soft_reset(void)
 
 /**
  * @brief       Enable system cache
+ * @note        必须在 mpu_memory_protection() 之后调用。
+ *              若先开 cache 再改 MPU 属性，旧属性下留在 D-Cache 里的脏行不会同步，
+ *              之后被换出时会回写到 AXI SRAM，把栈上的新数据(包括异常栈帧)覆盖成旧值，
+ *              表现为随机的 HardFault(常见 UFSR.INVSTATE)。
  * @param       None
  * @retval      None
  */
 void sys_cache_enable(void)
 {
-    SCB_EnableICache();     /* Enable I-Cache */
-    SCB_EnableDCache();     /* Enable D-Cache */
-    SCB->CACR |= 1 << 2;    /* Force D-Cache write-through; avoid problems in actual use if disabled */
+    /* FORCEWT 只有在 D-Cache 关闭时才写得进去；关缓存时 CMSIS 会 clean+invalidate，
+       丢掉可能残留的脏行，保证 cache 与 SRAM 内容一致 */
+    SCB_DisableDCache();
+    SCB_DisableICache();
+    SCB->CACR |= 1U << 2;   /* Force D-Cache write-through, no write-allocate */
+    SCB_EnableICache();
+    SCB_EnableDCache();     /* 使能前内部会先 invalidate 整片 D-Cache */
+    __DSB();
+    __ISB();
 }
 
 static uint32_t g_fac_us = 0;      /* Microsecond delay multiplier */

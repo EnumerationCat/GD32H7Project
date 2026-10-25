@@ -55,7 +55,7 @@
                 "-f",
                 "interface/cmsis-dap.cfg",
                 "-f",
-                "target/gd32h7x.cfg",
+                "target/gd32h7xx.cfg",
                 "-c",
                 "program ./build/bootloader.elf verify reset exit"
             ],
@@ -73,13 +73,17 @@
                 "-f",
                 "interface/cmsis-dap.cfg",
                 "-f",
-                "target/gd32h7x.cfg",
+                "target/gd32h7xx.cfg",
                 "-c",
-                "load_image ./build/u-boot_app.img 0x08010000 bin",
+                "reset halt",
+                "-c",
+                "flash write_image erase ./build/u-boot_app.img 0x08010000 bin",
                 "-c",
                 "verify_image ./build/u-boot_app.img 0x08010000 bin",
                 "-c",
-                "reset exit"
+                "reset run",
+                "-c",
+                "exit"
             ],
             "dependsOn": [
                 "Wake DP (pyOCD)"
@@ -95,15 +99,19 @@
                 "-f",
                 "interface/cmsis-dap.cfg",
                 "-f",
-                "target/gd32h7x.cfg",
+                "target/gd32h7xx.cfg",
                 "-c",
                 "program ./build/bootloader.elf verify",
                 "-c",
-                "load_image ./build/u-boot_app.img 0x08010000 bin",
+                "reset halt",
+                "-c",
+                "flash write_image erase ./build/u-boot_app.img 0x08010000 bin",
                 "-c",
                 "verify_image ./build/u-boot_app.img 0x08010000 bin",
                 "-c",
-                "reset exit"
+                "reset run",
+                "-c",
+                "exit"
             ],
             "dependsOn": [
                 "Wake DP (pyOCD)"

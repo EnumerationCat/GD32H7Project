@@ -6,8 +6,10 @@ __HEAP_SIZE  = 0x10000;
 
 MEMORY
 {
-    /* 前 64K 给 bootloader；0x08010000 起 64 字节为 uImage 头，App 本体从 0x08010040 开始 */
-    FLASH       (rx)    : ORIGIN = 0x08010040, LENGTH = 3776K - 64
+    /* 前 64K 给 bootloader；0x08010000 起 64 字节 uImage 头，App 从 0x08010400 开始。
+       Cortex-M7 要求向量表按"异常数向上取整到 2 的幂"对齐：186 项 -> 744 字节 -> 1024 字节。
+       只满足 128 字节对齐时，外部中断取向量会落到错误地址(SysTick 不受影响) */
+    FLASH       (rx)    : ORIGIN = 0x08010400, LENGTH = 3776K - 1024
     /* 共享 RAM 512K 由选项字节全部分配为 256K ITCM + 256K DTCM，无 AXI 共享段 */
     AXISRAM     (xrw)   : ORIGIN = 0x24000000, LENGTH = 512K
     ITCMRAM     (xrw)   : ORIGIN = 0x00000000, LENGTH = 256K

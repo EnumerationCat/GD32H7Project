@@ -65,6 +65,13 @@ void mpu_set_protection(uint32_t baseaddr, uint32_t size, uint32_t rnum, uint8_t
  */
 void mpu_memory_protection(void)
 {
+    uint32_t primask = __get_PRIMASK();
+
+    /* 配置期间关中断：mpu_set_protection() 每次都会先把 MPU 关掉再打开，
+       若中途进中断，中断里会按默认内存映射(可缓存/写回)访问栈，
+       与最终属性不一致，容易在 cache 打开后留下脏行 */
+    __disable_irq();
+
     /* 保护整个ITCM,共256K字节 */
     mpu_set_protection( 0x00000000,                 /* 区域基地址 */
                         MPU_REGION_SIZE_256KB,      /* 区域大小 */
@@ -85,13 +92,15 @@ void mpu_memory_protection(void)
                         MPU_ACCESS_CACHEABLE,       /* 允许cache */
                         MPU_ACCESS_BUFFERABLE);     /* 允许缓冲 */
 
-    /* 保护整个AXI SRAM,共512K字节（共享 RAM 已划为 TCM，无 AXI 共享段） */
+    /* 保护整个AXI SRAM,共512K字节（共享 RAM 已划为 TCM，无 AXI 共享段）。
+       单核使用，必须标成 NON_SHAREABLE：可共用的 Normal 内存是否走 cache 由实现决定，
+       标成 SHAREABLE 会让这块内存的属性不稳定，栈/堆就在这块里 */
     mpu_set_protection( 0x24000000,                 /* 区域基地址 */
                         MPU_REGION_SIZE_512KB,      /* 区域大小 */
                         MPU_REGION_NUMBER2,         /* 区域编号 */
                         MPU_INSTRUCTION_EXEC_PERMIT,/* 允许指令访问 */
                         MPU_AP_FULL_ACCESS,         /* 全访问 */
-                        MPU_ACCESS_SHAREABLE,       /* 允许共用 */
+                        MPU_ACCESS_NON_SHAREABLE,   /* 禁止共用 */
                         MPU_ACCESS_CACHEABLE,       /* 允许cache */
                         MPU_ACCESS_NON_BUFFERABLE); /* 禁止缓冲 */
 
@@ -123,7 +132,11 @@ void mpu_memory_protection(void)
                         MPU_AP_FULL_ACCESS,         /* 全访问 */
                         MPU_ACCESS_NON_SHAREABLE,   /* 禁止共用 */
                         MPU_ACCESS_CACHEABLE,       /* 允许cache */
-                        MPU_ACCESS_BUFFERABLE);     /* 允许缓冲 */                               
+                        MPU_ACCESS_BUFFERABLE);     /* 允许缓冲 */
+
+    if(0U == primask) {
+        __enable_irq();
+    }
 }
 
 /**
