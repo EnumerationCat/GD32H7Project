@@ -57,7 +57,7 @@ void norflash_init(void)
         }
     }
 
-    printf("NorFlash:%x\r\n", g_norflash_type);
+    printf("NorFlash ID:%x\r\n", g_norflash_type);
 }
 
 /**

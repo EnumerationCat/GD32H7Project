@@ -205,15 +205,11 @@ void start_Task(void * pvParameters)
 
 void task1(void *pvParameters) {
 
-	printf("[DBG] task1 lv_init...\r\n");
 	lv_init();
-	printf("[DBG] task1 disp init...\r\n");
 	lv_port_disp_init();
-	printf("[DBG] task1 indev init...\r\n");
 	lv_port_indev_init();
-	printf("[DBG] task1 ui...\r\n");
 	user_home();
-	printf("[DBG] task1 ui ok\r\n");
+
 	//lv_demo_widgets();
 	//lv_demo_stress();
 	//lv_demo_benchmark();
@@ -243,77 +239,14 @@ void task1(void *pvParameters) {
 
 void task2(void * pvParameters)
 {
-	printf("[DBG] task2 start\r\n");
 
     while (1) {
        // printf("任务2:....\r\n");
 
 		LED1_TOGGLE();
-		printf("[DBG] task2 tick\r\n");
 
         vTaskDelay(1000);
     }
-}
-
-
-/* [DBG] 打印硬错误现场，定位跑飞位置 */
-void hardfault_report(uint32_t *sp, uint32_t exc_return)
-{
-	const uint32_t *base = sp - 32;     /* 从 sp-0x80 开始，覆盖可能位于下方的定时器异常帧 */
-
-	printf("\r\n[DBG] HARDFAULT exc_return=0x%08lX\r\n", (unsigned long)exc_return);
-	printf("[DBG] sp=0x%08lX msp=0x%08lX psp=0x%08lX control=0x%08lX primask=%lu ccr=0x%08lX\r\n",
-	       (unsigned long)sp, (unsigned long)__get_MSP(), (unsigned long)__get_PSP(),
-	       (unsigned long)__get_CONTROL(), (unsigned long)__get_PRIMASK(), (unsigned long)SCB->CCR);
-	/* Cortex-M7: 基本栈帧就在 handler 的 sp 处，FP 上下文(S0-S15/FPSCR)在它上方 */
-	printf("[DBG] pc=0x%08lX lr=0x%08lX xpsr=0x%08lX\r\n",
-	       (unsigned long)sp[6], (unsigned long)sp[5], (unsigned long)sp[7]);
-	printf("[DBG] r0=0x%08lX r1=0x%08lX r2=0x%08lX r3=0x%08lX r12=0x%08lX\r\n",
-	       (unsigned long)sp[0], (unsigned long)sp[1], (unsigned long)sp[2],
-	       (unsigned long)sp[3], (unsigned long)sp[4]);
-	printf("[DBG] cfsr=0x%08lX hfsr=0x%08lX mmfar=0x%08lX bfar=0x%08lX\r\n",
-	       (unsigned long)SCB->CFSR, (unsigned long)SCB->HFSR,
-	       (unsigned long)SCB->MMFAR, (unsigned long)SCB->BFAR);
-	printf("[DBG] icsr=0x%08lX vtor=0x%08lX vec186=0x%08lX\r\n",
-	       (unsigned long)SCB->ICSR, (unsigned long)SCB->VTOR,
-	       (unsigned long)((volatile uint32_t *)(uintptr_t)SCB->VTOR)[186]);
-	printf("[DBG] mpu_ctrl=0x%08lX shcsr=0x%08lX\r\n",
-	       (unsigned long)MPU->CTRL, (unsigned long)SCB->SHCSR);
-	printf("[DBG] isr_cnt=%lu ticks=%lu systick=%lu fpccr=0x%08lX fcar=0x%08lX cacr=0x%08lX ccsidr=0x%08lX\r\n",
-	       (unsigned long)g_timer_isr_count, (unsigned long)ulHighFrequencyTimerTicks,
-	       (unsigned long)g_systick_count,
-	       (unsigned long)FPU->FPCCR, (unsigned long)FPU->FPCAR,
-	       (unsigned long)SCB->CACR, (unsigned long)SCB->CCSIDR);
-	/* 被打断的那个异常(带 FP 扩展帧)的基本栈帧：FPCAR 指向 FP 区，基本帧在它下面 0x20 */
-	if(0U != FPU->FPCAR) {
-		const uint32_t *tf = (const uint32_t *)((uintptr_t)FPU->FPCAR - 0x20U);
-
-		printf("[DBG] fpframe@0x%08lX: %08lX %08lX %08lX %08lX %08lX %08lX %08lX %08lX\r\n",
-		       (unsigned long)(uintptr_t)tf,
-		       (unsigned long)tf[0], (unsigned long)tf[1], (unsigned long)tf[2],
-		       (unsigned long)tf[3], (unsigned long)tf[4], (unsigned long)tf[5],
-		       (unsigned long)tf[6], (unsigned long)tf[7]);
-	}
-	/* 原始内存，带地址打印，方便核对帧到底落在哪 */
-	for (int32_t i = 0; i < 44; i += 4) {
-		printf("[DBG] %08lX: %08lX %08lX %08lX %08lX\r\n",
-		       (unsigned long)(uintptr_t)&base[i],
-		       (unsigned long)base[i + 0], (unsigned long)base[i + 1],
-		       (unsigned long)base[i + 2], (unsigned long)base[i + 3]);
-	}
-	for (;;) {
-	}
-}
-
-__attribute__((naked)) void HardFault_Handler(void)
-{
-	__asm volatile(
-		"tst lr, #4\n\t"
-		"ite eq\n\t"
-		"mrseq r0, msp\n\t"
-		"mrsne r0, psp\n\t"
-		"mov r1, lr\n\t"
-		"b hardfault_report\n\t");
 }
 
 
