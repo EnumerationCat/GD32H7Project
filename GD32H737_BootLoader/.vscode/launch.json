@@ -1,0 +1,22 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "cwd": "${workspaceRoot}",
+            "type": "cortex-debug",
+            "request": "launch",
+            "name": "dplinkDebug",
+            "servertype": "openocd",
+            "serverpath": "D:/Cmake_Tool/gd32-openocd/bin/openocd.exe",
+            "preLaunchTask": "Wake DP (pyOCD)",
+            "executable": "./build/DEMO.elf",
+            "runToEntryPoint": "main",
+            "svdFile": "./GD32H7xx.svd",
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/gd32h7xx.cfg"
+            ],
+            "toolchainPrefix": "arm-none-eabi"
+        }
+    ]
+}

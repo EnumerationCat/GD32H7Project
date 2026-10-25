@@ -1,0 +1,94 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CMake Configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE",
+                "-GNinja",
+                "-Bbuild"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "CMake Build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build",
+                "--target",
+                "all"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Wake DP (pyOCD)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "pyocd",
+                "commander",
+                "-t",
+                "cortex_m",
+                "-c",
+                "read32 0xE000ED00",
+                "-c",
+                "exit"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Flash",
+            "type": "shell",
+            "command": "D:/Cmake_Tool/gd32-openocd/bin/openocd.exe",
+            "args": [
+                "-f",
+                "interface/cmsis-dap.cfg",
+                "-f",
+                "target/gd32h7x.cfg",
+                "-c",
+                "program ./build/DEMO.elf verify reset exit"
+            ],
+            "dependsOn": [
+                "Wake DP (pyOCD)"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Flash All (Boot + App)",
+            "type": "shell",
+            "command": "D:/Cmake_Tool/gd32-openocd/bin/openocd.exe",
+            "args": [
+                "-f",
+                "interface/cmsis-dap.cfg",
+                "-f",
+                "target/gd32h7x.cfg",
+                "-c",
+                "program ./build/BOOT.elf verify",
+                "-c",
+                "program ./build/DEMO.elf verify reset exit"
+            ],
+            "dependsOn": [
+                "Wake DP (pyOCD)"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        }
+
+    ]
+}

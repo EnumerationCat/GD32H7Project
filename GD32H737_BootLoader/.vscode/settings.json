@@ -1,0 +1,56 @@
+{
+    "editor.mouseWheelZoom" : true, /*启用鼠标滚轮缩放*/
+
+    "editor.insertSpaces":false,/*自动插入空格禁用*/
+    "editor.detectIndentation":false,/*启用时根据文件内容进行重写*/
+    "editor.renderControlCharacters":true,/*是否显示控制字符：启用*/
+    "editor.renderWhitespace":"all",/*显示 4 个空格是....*/
+    "editor.tabSize": 4,/* tab 设置为 4 个空格*/
+	"editor.fontSize": 18, /*代码字体*/
+    "update.mode":"manual",
+	"idf.showOnboardingOnInit": false,
+	"editor.fontFamily": "JetBrains Mono",
+	"editor.fontLigatures": true,
+	"workbench.colorTheme": "Default Dark Modern",
+	"window.dialogStyle": "custom",
+	"debug.showBreakpointsInOverviewRuler": true,
+	"editor.smoothScrolling": true,
+	"workbench.list.smoothScrolling": true,
+	"editor.cursorBlinking": "smooth",
+	"terminal.integrated.smoothScrolling": true,
+
+
+    
+    // "terminal.integrated.profiles.windows": {
+    //     "Git Bash": {
+    //         "path": "D:/Git/Git/Git/bin/bash.exe",
+    //         "args": []
+    //     }
+    // },
+    // "terminal.integrated.defaultProfile.windows": "Git Bash",
+    // "editor.formatOnSave": true,
+    // "editor.formatOnPaste": false,
+    // "editor.defaultFormatter": "xaver.clang-format",
+    // "clang-format.executable": "D:/clang+llvm_18.1.8/bin/clang-format.exe",
+    // "clang-format.assumeFilename": "./.clang-format",
+    // "clang-format.fallbackStyle": "Google"
+    "VsCodeTaskButtons.showCounter": true,
+    "VsCodeTaskButtons.tasks": [
+        {
+            "label": "$(wrench) Configure",
+            "task": "CMake Configure",
+            "tooltip": "Run CMake Configure Task"
+        },
+        {
+            "label": "$(tools) Build",
+            "task": "CMake Build",
+            "tooltip": "Run CMake Build Task"
+        },
+        {
+            "label": "$(chip) DPLink Flash",
+            "task": "Flash",
+            "tooltip": "Run Flash Task"
+        },
+      
+    ]
+}
