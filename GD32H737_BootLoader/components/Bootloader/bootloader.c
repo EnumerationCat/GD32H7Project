@@ -102,9 +102,9 @@ int bootloader_app_is_valid(uint32_t image_base, uint32_t *app_base)
         return 0;
     }
 
-    load = ih_be32(hdr->ih_load);
-    ep   = ih_be32(hdr->ih_ep);
-    size = ih_be32(hdr->ih_size);
+    load = ih_be32(hdr->ih_load);//app start 的位置
+    ep   = ih_be32(hdr->ih_ep);  //app reset_handler的位置
+    size = ih_be32(hdr->ih_size);//app的大小
 
     /* 数据须落在 App 分区内，且不能覆盖 uImage 头本身 */
     if((load < (APP_BASE_ADDR + sizeof(image_header_t))) || (load >= FLASH_END_ADDR)) {
