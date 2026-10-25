@@ -9,7 +9,7 @@
             "servertype": "openocd",
             "serverpath": "D:/Cmake_Tool/gd32-openocd/bin/openocd.exe",
             "preLaunchTask": "Wake DP (pyOCD)",
-            "executable": "./build/DEMO.elf",
+            "executable": "./build/app.elf",
             "runToEntryPoint": "main",
             "svdFile": "./GD32H7xx.svd",
             "configFiles": [

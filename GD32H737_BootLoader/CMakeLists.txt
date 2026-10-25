@@ -10,7 +10,7 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/cortex_m7.cmake")
 message("[ROOT] Build Type: ${CMAKE_BUILD_TYPE}")
 message("[ROOT] Toolchain File: ${CMAKE_TOOLCHAIN_FILE}")
 
-project(DEMO LANGUAGES C CXX ASM)
+project(app LANGUAGES C CXX ASM)
 
 # 生成 .s 反汇编清单需要 Python
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -22,11 +22,11 @@ add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 
 # ---------------- Bootloader：链接在 0x08000000（前 64K） ----------------
-add_executable(BOOT)
-set_target_properties(BOOT PROPERTIES SUFFIX ".elf")
+add_executable(bootloader)
+set_target_properties(bootloader PROPERTIES SUFFIX ".elf")
 
 # 各子目录据此把共享源码同时加到 App 与 Bootloader
-set(FIRMWARE_TARGETS "${PROJECT_NAME};BOOT")
+set(FIRMWARE_TARGETS "${PROJECT_NAME};bootloader")
 
 # cmsis-core / cmsis-compiler：两个目标共用
 foreach(t ${FIRMWARE_TARGETS})
@@ -41,8 +41,8 @@ foreach(t ${FIRMWARE_TARGETS})
 endforeach()
 
 # Bootloader：向量表基址回 0x08000000，并需要 gd32h7xx_conf.h
-target_compile_definitions(BOOT PRIVATE VECT_TAB_OFFSET=0x0)
-target_include_directories(BOOT PRIVATE "${CMAKE_SOURCE_DIR}/src/app/config")
+target_compile_definitions(bootloader PRIVATE VECT_TAB_OFFSET=0x0)
+target_include_directories(bootloader PRIVATE "${CMAKE_SOURCE_DIR}/src/app/config")
 
 #app（仅 App）
 add_subdirectory(src/app)
@@ -50,7 +50,7 @@ add_subdirectory(src/app)
 # driver（App + Bootloader）
 add_subdirectory(src/driver)
 
-# components（BSP/Middlewares 仅 App；Bootloader 仅 BOOT）
+# components（BSP/Middlewares 仅 App；Bootloader 仅 bootloader）
 add_subdirectory(components/Bootloader)
 add_subdirectory(components/BSP)
 add_subdirectory(components/Middlewares)
@@ -63,9 +63,9 @@ target_link_options(${PROJECT_NAME} PRIVATE
     -T${CMAKE_SOURCE_DIR}/gd32h7xx_flash.ld
     -Wl,-Map=${PROJECT_NAME}.map
 )
-target_link_options(BOOT PRIVATE
+target_link_options(bootloader PRIVATE
     -T${CMAKE_SOURCE_DIR}/bootloader.ld
-    -Wl,-Map=BOOT.map
+    -Wl,-Map=bootloader.map
 )
 
 foreach(t ${FIRMWARE_TARGETS})

@@ -1,6 +1,6 @@
 # GD32H7xx_Driver
 # CMakeLists for GD32H7xx Standard Peripheral Library
-# 驱动源码同时提供给 App(DEMO) 与 Bootloader(BOOT)
+# 驱动源码同时提供给 App(app) 与 Bootloader(bootloader)
 
 foreach(t ${FIRMWARE_TARGETS})
 target_compile_definitions(${t} PRIVATE

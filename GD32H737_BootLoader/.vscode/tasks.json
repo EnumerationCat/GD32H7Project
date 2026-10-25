@@ -57,7 +57,7 @@
                 "-f",
                 "target/gd32h7x.cfg",
                 "-c",
-                "program ./build/DEMO.elf verify reset exit"
+                "program ./build/app.elf verify reset exit"
             ],
             "dependsOn": [
                 "Wake DP (pyOCD)"
@@ -79,9 +79,9 @@
                 "-f",
                 "target/gd32h7x.cfg",
                 "-c",
-                "program ./build/BOOT.elf verify",
+                "program ./build/bootloader.elf verify",
                 "-c",
-                "program ./build/DEMO.elf verify reset exit"
+                "program ./build/app.elf verify reset exit"
             ],
             "dependsOn": [
                 "Wake DP (pyOCD)"
