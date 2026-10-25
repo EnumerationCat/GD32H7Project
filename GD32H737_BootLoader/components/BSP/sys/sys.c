@@ -71,23 +71,9 @@ void sys_soft_reset(void)
  */
 void sys_cache_enable(void)
 {
-    /* 复位后 D-Cache 的使能状态和内容是未知的：
-     *   已使能 -> 内容有效，SCB_DisableDCache() 的 clean+invalidate 是安全的，可以丢掉脏行；
-     *   未使能 -> 内容是随机的，绝不能 clean：垃圾行会被写回随机地址，表现为
-     *             BFSR.IMPRECISERR 触发的 HardFault（不精确总线错误），且时有时无。
-     *             此时只 invalidate（不回写内存）。
-     * FORCEWT 只有在 D-Cache 关闭时才写得进去。 */
-    if((SCB->CCR & SCB_CCR_DC_Msk) != 0U) {
-        SCB_DisableDCache();    /* 已在跑：clean + invalidate */
-    } else {
-        SCB_InvalidateDCache(); /* 从未开过：只作废，不回写 */
-    }
-    SCB_DisableICache();
-    SCB->CACR |= 1U << 2;   /* Force D-Cache write-through, no write-allocate */
-    SCB_EnableICache();
-    SCB_EnableDCache();     /* 使能前内部会先 invalidate 整片 D-Cache */
-    __DSB();
-    __ISB();
+    SCB_EnableICache();     /* Enable I-Cache */
+    SCB_EnableDCache();     /* Enable D-Cache */
+    SCB->CACR |= 1 << 2;    /* Force D-Cache write-through; avoid problems in actual use if disabled */
 }
 
 static uint32_t g_fac_us = 0;      /* Microsecond delay multiplier */
