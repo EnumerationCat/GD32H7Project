@@ -31,9 +31,6 @@
 
 void freertos_start(void);
 
-extern volatile uint32_t g_timer_isr_count;
-extern volatile unsigned long ulHighFrequencyTimerTicks;
-volatile uint32_t g_systick_count;
 
 /* 向量表就留在 flash 里：链接地址 0x08010400（见 gd32h7xx_flash.ld），
    VTOR 由 SystemInit 按 VECT_TAB_OFFSET 设置，bootloader 跳转前也设成同一个值。
@@ -106,7 +103,6 @@ void SysTick_Handler(void)
 
 	//LED0(0);
 
-	g_systick_count++;
 
 	if(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
 	{
