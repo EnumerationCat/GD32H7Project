@@ -12,6 +12,11 @@ message("[ROOT] Toolchain File: ${CMAKE_TOOLCHAIN_FILE}")
 
 project(DEMO LANGUAGES C CXX ASM)
 
+# 生成 .s 反汇编清单需要 Python
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+get_filename_component(ARM_TOOLCHAIN_BIN "${CMAKE_OBJDUMP}" DIRECTORY)
+set(ARM_NM "${ARM_TOOLCHAIN_BIN}/arm-none-eabi-nm.exe")
+
 # ---------------- App：链接在 0x08010000 ----------------
 add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".elf")
@@ -67,5 +72,12 @@ foreach(t ${FIRMWARE_TARGETS})
     add_custom_command(TARGET ${t} POST_BUILD
         COMMAND ${CMAKE_OBJCOPY} -Oihex ${t}.elf ${t}.hex
         COMMAND ${CMAKE_OBJCOPY} -Obinary ${t}.elf ${t}.bin
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/cmake/gen_disasm.py"
+            --objdump "${CMAKE_OBJDUMP}"
+            --nm "${ARM_NM}"
+            --elf "${t}.elf"
+            --out "${t}.s"
+        COMMENT "Generating ${t}.s"
+        VERBATIM
     )
 endforeach()
