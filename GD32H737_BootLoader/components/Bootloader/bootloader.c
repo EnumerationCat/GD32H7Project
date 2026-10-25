@@ -87,10 +87,43 @@ static void boot_puthex32(uint32_t v)
     }
 }
 
-int bootloader_app_is_valid(uint32_t app_base)
+/* uImage 头按大端存储，读入后需要转换 */
+static uint32_t ih_be32(__be32 v)
 {
-    uint32_t sp = *(volatile uint32_t *)app_base;
-    uint32_t pc = *(volatile uint32_t *)(app_base + 4U);
+    return __builtin_bswap32((uint32_t)v);
+}
+
+int bootloader_app_is_valid(uint32_t image_base, uint32_t *app_base)
+{
+    const image_header_t *hdr = (const image_header_t *)image_base;
+    uint32_t load, ep, size, sp, pc;
+
+    if(IH_MAGIC != ih_be32(hdr->ih_magic)) {
+        return 0;
+    }
+
+    load = ih_be32(hdr->ih_load);
+    ep   = ih_be32(hdr->ih_ep);
+    size = ih_be32(hdr->ih_size);
+
+    /* 数据须落在 App 分区内，且不能覆盖 uImage 头本身 */
+    if((load < (APP_BASE_ADDR + sizeof(image_header_t))) || (load >= FLASH_END_ADDR)) {
+        return 0;
+    }
+    if(size > (FLASH_END_ADDR - load)) {
+        return 0;
+    }
+
+    /* 入口点须在 App 的 Flash 区间内，且末位为 1（Thumb 位） */
+    if((ep < load) || (ep >= FLASH_END_ADDR)) {
+        return 0;
+    }
+    if(0U == (ep & 1U)) {
+        return 0;
+    }
+
+    sp = *(volatile uint32_t *)load;
+    pc = *(volatile uint32_t *)(load + 4U);
 
     /* 栈顶必须落在 App 使用的 RAM 区间内 */
     if((sp < APP_SRAM_START) || (sp > APP_SRAM_END)) {
@@ -98,13 +131,14 @@ int bootloader_app_is_valid(uint32_t app_base)
     }
 
     /* 复位向量必须落在 App 的 Flash 区间内，且末位为 1（Thumb 位） */
-    if((pc < app_base) || (pc >= FLASH_END_ADDR)) {
+    if((pc < load) || (pc >= FLASH_END_ADDR)) {
         return 0;
     }
     if(0U == (pc & 1U)) {
         return 0;
     }
 
+    *app_base = load;
     return 1;
 }
 
@@ -173,6 +207,8 @@ static void boot_tcm_shared_ram_ensure(void)
 
 int main(void)
 {
+    uint32_t app_base = 0U;
+
     /* SystemInit() 已由 Reset_Handler 调用：时钟就绪，VTOR = 0x08000000 */
     boot_uart_init();
 
@@ -180,18 +216,20 @@ int main(void)
 
     boot_tcm_shared_ram_ensure();
 
-    if(bootloader_app_is_valid(APP_BASE_ADDR)) {
-        boot_puts("[BOOT] app valid  msp=");
-        boot_puthex32(*(volatile uint32_t *)APP_BASE_ADDR);
+    if(bootloader_app_is_valid(APP_BASE_ADDR, &app_base)) {
+        boot_puts("[BOOT] uImage valid  load=");
+        boot_puthex32(app_base);
+        boot_puts(" msp=");
+        boot_puthex32(*(volatile uint32_t *)app_base);
         boot_puts(" reset_handle=");
-        boot_puthex32(*(volatile uint32_t *)(APP_BASE_ADDR + 4U));
+        boot_puthex32(*(volatile uint32_t *)(app_base + 4U));
         boot_puts(" -> jumping\r\n");
         boot_uart_flush();
 
-        bootloader_jump_to_app(APP_BASE_ADDR);
+        bootloader_jump_to_app(app_base);
     }
 
-    boot_puts("[BOOT] no valid app, stay in bootloader\r\n");
+    boot_puts("[BOOT] no valid uImage, stay in bootloader\r\n");
     for(;;) {
     }
 }

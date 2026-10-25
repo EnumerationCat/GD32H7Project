@@ -48,7 +48,7 @@
             "problemMatcher": []
         },
         {
-            "label": "Flash",
+            "label": "Boot Flash",
             "type": "shell",
             "command": "D:/Cmake_Tool/gd32-openocd/bin/openocd.exe",
             "args": [
@@ -57,17 +57,35 @@
                 "-f",
                 "target/gd32h7x.cfg",
                 "-c",
-                "program ./build/app.elf verify reset exit"
+                "program ./build/bootloader.elf verify reset exit"
             ],
             "dependsOn": [
                 "Wake DP (pyOCD)"
             ],
             "dependsOrder": "sequence",
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
+            "problemMatcher": []
+        },
+        {
+            "label": "App Flash",
+            "type": "shell",
+            "command": "D:/Cmake_Tool/gd32-openocd/bin/openocd.exe",
+            "args": [
+                "-f",
+                "interface/cmsis-dap.cfg",
+                "-f",
+                "target/gd32h7x.cfg",
+                "-c",
+                "load_image ./build/u-boot_app.img 0x08010000 bin",
+                "-c",
+                "verify_image ./build/u-boot_app.img 0x08010000 bin",
+                "-c",
+                "reset exit"
+            ],
+            "dependsOn": [
+                "Wake DP (pyOCD)"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         },
         {
             "label": "Flash All (Boot + App)",
@@ -81,7 +99,11 @@
                 "-c",
                 "program ./build/bootloader.elf verify",
                 "-c",
-                "program ./build/app.elf verify reset exit"
+                "load_image ./build/u-boot_app.img 0x08010000 bin",
+                "-c",
+                "verify_image ./build/u-boot_app.img 0x08010000 bin",
+                "-c",
+                "reset exit"
             ],
             "dependsOn": [
                 "Wake DP (pyOCD)"

@@ -18,9 +18,14 @@
                 "tooltip": "Run CMake Build Task"
             },
             {
-                "label": "$(chip) DPLink Flash",
-                "task": "Flash",
-                "tooltip": "Run Flash Task"
+                "label": "$(chip) Boot Flash",
+                "task": "Boot Flash",
+                "tooltip": "Run Boot Flash Task"
+            },
+            {
+                "label": "$(arrow-up) App Flash",
+                "task": "App Flash",
+                "tooltip": "Run App Flash Task"
             },
             {
                 "label": "$(rocket) Flash All",

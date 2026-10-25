@@ -6,8 +6,8 @@ __HEAP_SIZE  = 0x10000;
 
 MEMORY
 {
-    /* 前 64K 保留给 bootloader，App 从 0x08010000 开始 */
-    FLASH       (rx)    : ORIGIN = 0x08010000, LENGTH = 3776K
+    /* 前 64K 给 bootloader；0x08010000 起 64 字节为 uImage 头，App 本体从 0x08010040 开始 */
+    FLASH       (rx)    : ORIGIN = 0x08010040, LENGTH = 3776K - 64
     /* 共享 RAM 512K 由选项字节全部分配为 256K ITCM + 256K DTCM，无 AXI 共享段 */
     AXISRAM     (xrw)   : ORIGIN = 0x24000000, LENGTH = 512K
     ITCMRAM     (xrw)   : ORIGIN = 0x00000000, LENGTH = 256K

@@ -17,7 +17,13 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 get_filename_component(ARM_TOOLCHAIN_BIN "${CMAKE_OBJDUMP}" DIRECTORY)
 set(ARM_NM "${ARM_TOOLCHAIN_BIN}/arm-none-eabi-nm.exe")
 
-# ---------------- App：链接在 0x08010000 ----------------
+# 给 app.bin 加 uImage 头（-a 为 App 链接地址，-e 由 Reset_Handler 自动推导）
+find_program(MKIMAGE_EXECUTABLE mkimage HINTS "${CMAKE_SOURCE_DIR}/tools" NO_DEFAULT_PATH)
+if(NOT MKIMAGE_EXECUTABLE)
+    message(FATAL_ERROR "mkimage not found in ${CMAKE_SOURCE_DIR}/tools")
+endif()
+
+# ---------------- App：链接在 0x08010040（0x08010000 起 64 字节是 uImage 头） ----------------
 add_executable(${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 
@@ -39,6 +45,9 @@ foreach(t ${FIRMWARE_TARGETS})
         "${CMAKE_SOURCE_DIR}/third_party/arm/cmsis-compiler/source/gcc/retarget_syscalls.c"
     )
 endforeach()
+
+# App：0x08010000 起 64 字节是 uImage 头，向量表在 0x08010040
+target_compile_definitions(${PROJECT_NAME} PRIVATE VECT_TAB_OFFSET=0x10040)
 
 # Bootloader：向量表基址回 0x08000000，并需要 gd32h7xx_conf.h
 target_compile_definitions(bootloader PRIVATE VECT_TAB_OFFSET=0x0)
@@ -81,3 +90,17 @@ foreach(t ${FIRMWARE_TARGETS})
         VERBATIM
     )
 endforeach()
+
+# App 加头产物：u-boot_app.img（烧到 0x08010000）
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/cmake/gen_uimage.py"
+        --mkimage "${MKIMAGE_EXECUTABLE}"
+        --nm "${ARM_NM}"
+        --elf "${PROJECT_NAME}.elf"
+        --bin "${PROJECT_NAME}.bin"
+        --load 0x08010040
+        --name "GD32H737-APP"
+        --out "u-boot_app.img"
+    COMMENT "Generating u-boot_app.img"
+    VERBATIM
+)
