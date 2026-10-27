@@ -61,8 +61,10 @@ int _write(int file, char *ptr, int len)
     int i;
     for(i = 0; i < len; i++)
     {
-        /* 等待串口发送完成 */
-        while (RESET == usart_flag_get(USART_UX, USART_FLAG_TC));
+        /* 等发送数据寄存器空即可写入下一字节。
+           不能等 TC：UART_Device 的收发会清零 TC，清掉后 TC 不会再自动置位，
+           这里等 TC 就会永久卡死 */
+        while (RESET == usart_flag_get(USART_UX, USART_FLAG_TBE));
         /* 发送单个字符 */
         usart_data_transmit(USART_UX, (uint8_t)ptr[i]);
     }

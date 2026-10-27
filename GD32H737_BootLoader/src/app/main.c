@@ -142,7 +142,7 @@ TaskHandle_t task2_TaskHandle;
 void task2(void * pvParameters);
 
 /*串口实验任务的配置*/
-#define UART_TASK_STACK 512
+#define UART_TASK_STACK 2048
 #define UART_TASK_PRIORITY 4
 TaskHandle_t uart_taskHandle;
 void uart_task(void * pvParameters);
@@ -256,7 +256,6 @@ void task1(void *pvParameters) {
 
 void task2(void * pvParameters)
 {
-
     while (1) {
        // printf("任务2:....\r\n");
 
