@@ -23,7 +23,6 @@
 #include "stdio.h"
 #include "sys.h"
 
-#define LOG_INFO(fmt, ...)  printf("%s:%s:%d: " fmt, __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 /*******************************************************************************************************/
 /* 引脚和串口 定义 */
 
@@ -57,9 +56,36 @@
 /* 串口printf重定向配置：1=使能开启，0=禁用关闭 */
 #define USART_SUPPORT_PRINTF    1
 
+#if USART_SUPPORT_PRINTF
+#define LOG_INFO(fmt, ...)  printf("%s:%s:%d: " fmt, __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#endif
+
+
+#define UART_DMA_MODE        1      /* DMA + IDLE 空闲中断接收，DMA 发送 */
+#define UART_INTERRUPT_MODE  0      /* 接收缓冲区非空中断接收，发送空中断发送 */
+#define UART_DELAY_MODE      0      /* 查询方式收发 */
+
+#if ( (UART_INTERRUPT_MODE + UART_DMA_MODE + UART_DELAY_MODE) != 1 )
+    #error "just one mode can be selected"
+#endif
+
+
+
+#define UART_BUFFER_SIZE     512
+#define UART_RX_QUEUE_LEN    512
 /*******************************************************************************************************/
 
 void usart_init(uint32_t baudrate);                 /* 串口初始化函数 */
+
+/* GD32 版 UART 句柄：SPL 没有 HAL 句柄，发送状态只能自己存。
+   字段对应 STM32 HAL 的 UART_HandleTypeDef（pTxBuffPtr / TxXferSize / TxXferCount） */
+typedef struct
+{
+    uint32_t          Instance;     /* USART 外设基址 */
+    uint8_t          *pTxBuffPtr;   /* 发送缓冲区指针 */
+    volatile uint16_t TxXferSize;   /* 本次发送长度 */
+    volatile uint16_t TxXferCount;  /* 剩余待发送字节数 */
+} UART_HandleTypeDef;
 
 struct UART_Device {
     char *name;

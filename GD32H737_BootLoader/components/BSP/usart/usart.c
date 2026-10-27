@@ -135,35 +135,25 @@ void usart_init(uint32_t baudrate)
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
-/*                        UART_Device 设备抽象（参考 STM32 的 uart_device.c）                     */
+/*                        UART_Device 设备抽象                  */
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define UART_DMA_MODE        1      /* DMA + IDLE 空闲中断接收，DMA 发送 */
-#define UART_INTERRUPT_MODE  0      /* 接收缓冲区非空中断接收，发送空中断发送 */
-#define UART_DELAY_MODE      0      /* 查询方式收发 */
-
-#if ( (UART_INTERRUPT_MODE + UART_DMA_MODE + UART_DELAY_MODE) != 1 )
-    #error "just one mode can be selected"
-#endif
-
-#define UART_BUFFER_SIZE     512
-#define UART_RX_QUEUE_LEN    512
-
 struct UART_Data {
-    SemaphoreHandle_t xTxSem;   /* 发送完成信号量 */
-    SemaphoreHandle_t xTxMutex; /* 发送互斥锁 */
-    QueueHandle_t     xRxQueue; /* 接收队列，每项 1 字节 */
+    UART_HandleTypeDef *handle;
+    SemaphoreHandle_t   xTxSem;   /* 发送完成信号量 */
+    SemaphoreHandle_t   xTxMutex; /* 发送互斥锁 */
+    QueueHandle_t       xRxQueue; /* 接收队列，每项 1 字节 */
     /* 32 字节对齐：AXI SRAM 是 cacheable，DMA 前后需要按 cache 行做维护 */
-    uint8_t           rxdata[UART_BUFFER_SIZE] __attribute__((aligned(32)));
-    volatile int      read_index;
-#if UART_INTERRUPT_MODE
-    uint8_t          *txbuf;    /* 中断发送缓冲，调用者需等待发送完成 */
-    int               txlen;
-    volatile int      txidx;
-#endif
+    uint8_t             rxdata[UART_BUFFER_SIZE] __attribute__((aligned(32)));
+    volatile int        read_index;
 };
 
-static struct UART_Data   g_gd32_uart0_data;
+static UART_HandleTypeDef g_gd32_uart0_handle = {
+    USART_UX, NULL, 0, 0
+};
+static struct UART_Data   g_gd32_uart0_data = {
+    &g_gd32_uart0_handle, NULL, NULL, NULL, {0}, 0
+};
 static struct UART_Device gd32_uart0;
 
 static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char parity, int stop);
@@ -275,6 +265,8 @@ void USART_UX_IRQHandler(void)
 #endif
 
 #if UART_INTERRUPT_MODE
+        UART_HandleTypeDef *huart = uart_data->handle;
+
         if (usart_interrupt_flag_get(USART_UX, USART_INT_FLAG_RBNE) != RESET)
         {
             uint8_t rxdata = (uint8_t)usart_data_receive(USART_UX);
@@ -283,11 +275,13 @@ void USART_UX_IRQHandler(void)
 
         if (usart_interrupt_flag_get(USART_UX, USART_INT_FLAG_TBE) != RESET)
         {
-            if (uart_data->txidx < uart_data->txlen)
+            if (huart->TxXferCount > 0U)
             {
-                usart_data_transmit(USART_UX, uart_data->txbuf[uart_data->txidx++]);
+                usart_data_transmit(USART_UX, *huart->pTxBuffPtr);
+                huart->pTxBuffPtr++;
+                huart->TxXferCount--;
             }
-            if (uart_data->txidx >= uart_data->txlen)
+            if (0U == huart->TxXferCount)
             {
                 usart_interrupt_disable(USART_UX, USART_INT_TBE);
                 usart_interrupt_enable(USART_UX, USART_INT_TC);
@@ -440,9 +434,9 @@ static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int
 
 #if UART_INTERRUPT_MODE
     usart_flag_clear(USART_UX, USART_FLAG_TC);
-    uart_data->txbuf = datas;
-    uart_data->txlen = len;
-    uart_data->txidx = 0;
+    uart_data->handle->pTxBuffPtr  = datas;
+    uart_data->handle->TxXferSize  = (uint16_t)len;
+    uart_data->handle->TxXferCount = (uint16_t)len;
     usart_interrupt_enable(USART_UX, USART_INT_TBE);
 #endif
 
@@ -470,9 +464,9 @@ static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int
 
 static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_ms)
 {
+#if !UART_DELAY_MODE
     struct UART_Data *uart_data = pDev->priv_data;
 
-#if !UART_DELAY_MODE
     /* 中断里写队列，这里从队列取数据；timeout_ms 直接作为 tick 使用 */
     if (pdPASS == xQueueReceive(uart_data->xRxQueue, data, (TickType_t)timeout_ms))
     {
@@ -480,16 +474,20 @@ static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_m
     }
     return -1;
 #else
-    while (timeout_ms-- > 0)
+    /* 对照 STM32 的 HAL_UART_Receive：阻塞查询，期间不让出 CPU。
+       不能 vTaskDelay(1)，1ms 的轮询间隔会漏掉连发的后续字节 */
+    TickType_t start = xTaskGetTickCount();
+
+    while (usart_flag_get(USART_UX, USART_FLAG_RBNE) == RESET)
     {
-        if (usart_flag_get(USART_UX, USART_FLAG_RBNE) != RESET)
+        if ((xTaskGetTickCount() - start) >= (TickType_t)timeout_ms)
         {
-            *data = (uint8_t)usart_data_receive(USART_UX);
-            return 0;
+            return -1;
         }
-        vTaskDelay(1);
     }
-    return -1;
+
+    *data = (uint8_t)usart_data_receive(USART_UX);
+    return 0;
 #endif
 }
 

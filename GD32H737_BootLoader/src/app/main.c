@@ -287,11 +287,13 @@ void uart_task(void * pvParameters)
 
     while (1)
     {
+		
         /* Recv 超时单位是 tick；收到一个字节就发回去 */
         if (0 == uart_dev->Recv(uart_dev, &data, 100))
         {
             uart_dev->Send(uart_dev, &data, 1, 100);
         }
+		vTaskDelay(1);
     }
 }
 
