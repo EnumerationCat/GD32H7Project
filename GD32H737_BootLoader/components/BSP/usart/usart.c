@@ -15,6 +15,9 @@
 #include <string.h>
 #include <stdint.h>
 
+/* 设备是否已完成初始化（互斥锁/信号量/队列是否已建好） */
+static uint8_t g_uart_dev_ready = 0;
+
 
 #if USART_SUPPORT_PRINTF
 
@@ -59,13 +62,27 @@ int _read(int file, char *ptr, int len)
 int _write(int file, char *ptr, int len)
 {
     int i;
+
+    /* 调度器已运行、设备已初始化，且不在中断/临界区内：走 UART_Device 发送，
+       与任务里的 Send 共用同一把发送锁，避免 DMA 发送和轮询写 TDATA 互相踩 */
+    if ((0U == __get_IPSR()) && (0U == __get_PRIMASK()) && (0U == __get_BASEPRI()) &&
+        (0U != g_uart_dev_ready) && (taskSCHEDULER_RUNNING == xTaskGetSchedulerState()))
+    {
+        struct UART_Device *dev = GetUARTDevice("gd32_uart0");
+
+        if (NULL != dev)
+        {
+            dev->Send(dev, (uint8_t *)ptr, len, 100);
+            return len;
+        }
+    }
+
+    /* 启动阶段/中断/临界区内的兜底：直接轮询发送数据寄存器空。
+       不能等 TC：UART_Device 的收发会清零 TC，清掉后 TC 不会再自动置位，
+       这里等 TC 就会永久卡死 */
     for(i = 0; i < len; i++)
     {
-        /* 等发送数据寄存器空即可写入下一字节。
-           不能等 TC：UART_Device 的收发会清零 TC，清掉后 TC 不会再自动置位，
-           这里等 TC 就会永久卡死 */
         while (RESET == usart_flag_get(USART_UX, USART_FLAG_TBE));
-        /* 发送单个字符 */
         usart_data_transmit(USART_UX, (uint8_t)ptr[i]);
     }
     return len;
@@ -148,7 +165,6 @@ struct UART_Data {
 
 static struct UART_Data   g_gd32_uart0_data;
 static struct UART_Device gd32_uart0;
-static uint8_t            g_uart_dev_ready = 0;
 
 static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char parity, int stop);
 static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms);
@@ -163,6 +179,8 @@ static void gd32_uart_dma_config(void)
     dma_single_data_parameter_struct dma_cfg;
 
     rcu_periph_clock_enable(RCU_DMA0);
+    /* GD32H7 的 DMAMUX 有独立 AHB1 时钟，不开的话请求映射不生效，DMA 收不到外设请求 */
+    rcu_periph_clock_enable(RCU_DMAMUX);
 
     /* ---------- 接收通道 ---------- */
     dma_deinit(USART_DMA, USART_DMA_RX_CH);

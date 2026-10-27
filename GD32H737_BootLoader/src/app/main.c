@@ -41,6 +41,11 @@ void freertos_start(void);
 
 int main(void)
 {
+    /* FreeRTOS 要求所有抢占优先级位都用作抢占位。SPL 的 nvic_irq_enable 在分组仍是
+       复位值时会自动改成 PRE2_SUB2，之后 FreeRTOS 的 FromISR 优先级校验断言失败
+       （configASSERT 是关中断死循环），必须在任何 nvic_irq_enable 之前设置好 */
+    nvic_priority_group_set(NVIC_PRIGROUP_PRE4_SUB0);
+
     delay_init(600);                        /* 延时初始化 */
 
     /* 串口统一走 UART_Device：Init 内部完成 GPIO/USART/DMA/中断配置 */
