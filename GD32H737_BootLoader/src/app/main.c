@@ -42,7 +42,13 @@ void freertos_start(void);
 int main(void)
 {
     delay_init(600);                        /* 延时初始化 */
-    usart_init(115200);                     /* 初始化USART */
+
+    /* 串口统一走 UART_Device：Init 内部完成 GPIO/USART/DMA/中断配置 */
+    struct UART_Device *uart_dev = GetUARTDevice("gd32_uart0");
+    if (NULL != uart_dev)
+    {
+        uart_dev->Init(uart_dev, 115200, 8, 'N', 1);
+    }
 	printf("SystemCoreClock: %lu Hz\r\n", SystemCoreClock);
     led_init();							                /* 初始化LED */
 	norflash_init();
@@ -135,6 +141,12 @@ void task1(void * pvParameters);
 TaskHandle_t task2_TaskHandle;
 void task2(void * pvParameters);
 
+/*串口实验任务的配置*/
+#define UART_TASK_STACK 512
+#define UART_TASK_PRIORITY 4
+TaskHandle_t uart_taskHandle;
+void uart_task(void * pvParameters);
+
 
 
 
@@ -185,6 +197,15 @@ void start_Task(void * pvParameters)
 		 (void *) NULL,//传递给任务函数的参数
 		 (UBaseType_t) TASK2_PRIORITY,//任务优先级
 		 (TaskHandle_t *) &task2_TaskHandle//任务句柄的地址
+
+		);
+
+	xTaskCreate((TaskFunction_t) uart_task,//任务函数的地址
+		 (char *) "uart_task",//任务名字
+		 (configSTACK_DEPTH_TYPE) UART_TASK_STACK,//任务堆栈大小
+		 (void *) NULL,//传递给任务函数的参数
+		 (UBaseType_t) UART_TASK_PRIORITY,//任务优先级
+		 (TaskHandle_t *) &uart_taskHandle//任务句柄的地址
 
 		);
 
@@ -242,6 +263,31 @@ void task2(void * pvParameters)
 		LED1_TOGGLE();
 
         vTaskDelay(1000);
+    }
+}
+
+
+/* 串口实验任务：启动时发一串提示，之后收到的字节原样回显 */
+void uart_task(void * pvParameters)
+{
+    static const char banner[] = "uart task ready, echo mode\r\n";
+    struct UART_Device *uart_dev = GetUARTDevice("gd32_uart0");
+    uint8_t data;
+
+    if (NULL == uart_dev)
+    {
+        vTaskDelete(NULL);
+    }
+
+    uart_dev->Send(uart_dev, (uint8_t *)banner, sizeof(banner) - 1, 100);
+
+    while (1)
+    {
+        /* Recv 超时单位是 tick；收到一个字节就发回去 */
+        if (0 == uart_dev->Recv(uart_dev, &data, 100))
+        {
+            uart_dev->Send(uart_dev, &data, 1, 100);
+        }
     }
 }
 
