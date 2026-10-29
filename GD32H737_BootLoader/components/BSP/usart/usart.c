@@ -18,6 +18,11 @@
 /* 设备是否已完成初始化（互斥锁/信号量/队列是否已建好） */
 static uint8_t g_uart_dev_ready = 0;
 
+/* UART 句柄：外设基址 + 发送状态 */
+static UART_HandleTypeDef g_gd32_uart0_handle = {
+    USART_UX, NULL, 0, 0
+};
+
 
 #if USART_SUPPORT_PRINTF
 
@@ -61,6 +66,7 @@ int _read(int file, char *ptr, int len)
 /*GCC 重定向 write 函数，printf 最终调用此函数 */
 int _write(int file, char *ptr, int len)
 {
+    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
     int i;
 
     /* 调度器已运行、设备已初始化，且不在中断/临界区内：走 UART_Device 发送，
@@ -82,8 +88,8 @@ int _write(int file, char *ptr, int len)
        这里等 TC 就会永久卡死 */
     for(i = 0; i < len; i++)
     {
-        while (RESET == usart_flag_get(USART_UX, USART_FLAG_TBE));
-        usart_data_transmit(USART_UX, (uint8_t)ptr[i]);
+        while (RESET == usart_flag_get(huart->Instance, USART_FLAG_TBE));
+        usart_data_transmit(huart->Instance, (uint8_t)ptr[i]);
     }
     return len;
 }
@@ -98,6 +104,8 @@ int _write(int file, char *ptr, int len)
  */
 void usart_init(uint32_t baudrate)
 {
+    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+
     /* IO 及 时钟配置 */
     rcu_periph_clock_enable(USART_TX_GPIO_CLK);     /* 使能串口TX脚时钟 */
     rcu_periph_clock_enable(USART_RX_GPIO_CLK);     /* 使能串口RX脚时钟 */
@@ -118,19 +126,19 @@ void usart_init(uint32_t baudrate)
     gpio_output_options_set(USART_RX_GPIO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_100_220MHZ, USART_RX_GPIO_PIN);
 
     /* 配置USART的参数 */
-    usart_deinit(USART_UX);                                 /* 复位USARTx */
-    usart_baudrate_set(USART_UX, baudrate);                 /* 设置波特率 */
-    usart_stop_bit_set(USART_UX, USART_STB_1BIT);           /* 一个停止位 */
-    usart_word_length_set(USART_UX, USART_WL_8BIT);         /* 字长为8位数据格式 */
-    usart_parity_config(USART_UX, USART_PM_NONE);           /* 无奇偶校验位 */
-    usart_transmit_config(USART_UX, USART_TRANSMIT_ENABLE); /* 使能发送 */
+    usart_deinit(huart->Instance);                                 /* 复位USARTx */
+    usart_baudrate_set(huart->Instance, baudrate);                 /* 设置波特率 */
+    usart_stop_bit_set(huart->Instance, USART_STB_1BIT);           /* 一个停止位 */
+    usart_word_length_set(huart->Instance, USART_WL_8BIT);         /* 字长为8位数据格式 */
+    usart_parity_config(huart->Instance, USART_PM_NONE);           /* 无奇偶校验位 */
+    usart_transmit_config(huart->Instance, USART_TRANSMIT_ENABLE); /* 使能发送 */
 
 #if USART_EN_RX                                             /* 如果使能了接收 */
-    usart_receive_config(USART_UX, USART_RECEIVE_ENABLE);   /* 使能接收 */
+    usart_receive_config(huart->Instance, USART_RECEIVE_ENABLE);   /* 使能接收 */
     /* 接收中断/NVIC 由 gd32_uart_init 按设备模式统一配置 */
 #endif
 
-    usart_enable(USART_UX);	                                /* 使能串口 */
+    usart_enable(huart->Instance);	                                /* 使能串口 */
 }
 
 
@@ -148,9 +156,6 @@ struct UART_Data {
     volatile int        read_index;
 };
 
-static UART_HandleTypeDef g_gd32_uart0_handle = {
-    USART_UX, NULL, 0, 0
-};
 static struct UART_Data   g_gd32_uart0_data = {
     &g_gd32_uart0_handle, NULL, NULL, NULL, {0}, 0
 };
@@ -166,6 +171,7 @@ static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_m
 /* 配置 USART0 的 RX/TX DMA 通道 */
 static void gd32_uart_dma_config(void)
 {
+    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
     dma_single_data_parameter_struct dma_cfg;
 
     rcu_periph_clock_enable(RCU_DMA0);
@@ -176,7 +182,7 @@ static void gd32_uart_dma_config(void)
     dma_deinit(USART_DMA, USART_DMA_RX_CH);
     dma_single_data_para_struct_init(&dma_cfg);
     dma_cfg.request             = USART_DMA_REQUEST_RX;
-    dma_cfg.periph_addr         = (uint32_t)&USART_RDATA(USART_UX);
+    dma_cfg.periph_addr         = (uint32_t)&USART_RDATA(huart->Instance);
     dma_cfg.periph_inc          = DMA_PERIPH_INCREASE_DISABLE;
     dma_cfg.memory0_addr        = (uint32_t)g_gd32_uart0_data.rxdata;
     dma_cfg.memory_inc          = DMA_MEMORY_INCREASE_ENABLE;
@@ -193,7 +199,7 @@ static void gd32_uart_dma_config(void)
     dma_deinit(USART_DMA, USART_DMA_TX_CH);
     dma_single_data_para_struct_init(&dma_cfg);
     dma_cfg.request             = USART_DMA_REQUEST_TX;
-    dma_cfg.periph_addr         = (uint32_t)&USART_TDATA(USART_UX);
+    dma_cfg.periph_addr         = (uint32_t)&USART_TDATA(huart->Instance);
     dma_cfg.periph_inc          = DMA_PERIPH_INCREASE_DISABLE;
     dma_cfg.memory0_addr        = 0;
     dma_cfg.memory_inc          = DMA_MEMORY_INCREASE_ENABLE;
@@ -248,6 +254,7 @@ static void gd32_uart_rx_dma_process(BaseType_t *woken)
 /* 串口全局中断：设备模式下处理 IDLE / TC（中断模式下处理 RBNE / TBE） */
 void USART_UX_IRQHandler(void)
 {
+    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
     BaseType_t woken = pdFALSE;
 
     if (g_uart_dev_ready)
@@ -257,48 +264,46 @@ void USART_UX_IRQHandler(void)
 #endif
 
 #if UART_DMA_MODE
-        if (usart_interrupt_flag_get(USART_UX, USART_INT_FLAG_IDLE) != RESET)
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_IDLE) != RESET)
         {
-            usart_interrupt_flag_clear(USART_UX, USART_INT_FLAG_IDLE);
+            usart_interrupt_flag_clear(huart->Instance, USART_INT_FLAG_IDLE);
             gd32_uart_rx_dma_process(&woken);
         }
 #endif
 
 #if UART_INTERRUPT_MODE
-        UART_HandleTypeDef *huart = uart_data->handle;
-
-        if (usart_interrupt_flag_get(USART_UX, USART_INT_FLAG_RBNE) != RESET)
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_RBNE) != RESET)
         {
-            uint8_t rxdata = (uint8_t)usart_data_receive(USART_UX);
+            uint8_t rxdata = (uint8_t)usart_data_receive(huart->Instance);
             xQueueSendFromISR(uart_data->xRxQueue, &rxdata, &woken);
         }
 
-        if (usart_interrupt_flag_get(USART_UX, USART_INT_FLAG_TBE) != RESET)
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_TBE) != RESET)
         {
             if (huart->TxXferCount > 0U)
             {
-                usart_data_transmit(USART_UX, *huart->pTxBuffPtr);
+                usart_data_transmit(huart->Instance, *huart->pTxBuffPtr);
                 huart->pTxBuffPtr++;
                 huart->TxXferCount--;
             }
             if (0U == huart->TxXferCount)
             {
-                usart_interrupt_disable(USART_UX, USART_INT_TBE);
-                usart_interrupt_enable(USART_UX, USART_INT_TC);
+                usart_interrupt_disable(huart->Instance, USART_INT_TBE);
+                usart_interrupt_enable(huart->Instance, USART_INT_TC);
             }
         }
 #endif
 
 #if !UART_DELAY_MODE
         /* DMA 发送完成(FTF)后才使能 TC 中断，这里表示真正发送完毕 */
-        if (usart_interrupt_flag_get(USART_UX, USART_INT_FLAG_TC) != RESET)
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_TC) != RESET)
         {
-            usart_interrupt_flag_clear(USART_UX, USART_INT_FLAG_TC);
-            usart_interrupt_disable(USART_UX, USART_INT_TC);
+            usart_interrupt_flag_clear(huart->Instance, USART_INT_FLAG_TC);
+            usart_interrupt_disable(huart->Instance, USART_INT_TC);
             xSemaphoreGiveFromISR(uart_data->xTxSem, &woken);
         }
 #endif
-        usart_flag_clear(USART_UX, USART_FLAG_ORERR);
+        usart_flag_clear(huart->Instance, USART_FLAG_ORERR);
     }
 
     portYIELD_FROM_ISR(woken);
@@ -324,12 +329,14 @@ void USART_DMA_RX_IRQHandler(void)
 /* 发送 DMA 传输完成：数据已全部写入 TDATA，再等 USART 的 TC 表示线上发完 */
 void USART_DMA_TX_IRQHandler(void)
 {
+    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+
     if (dma_interrupt_flag_get(USART_DMA, USART_DMA_TX_CH, DMA_INT_FLAG_FTF) != RESET)
     {
         dma_interrupt_flag_clear(USART_DMA, USART_DMA_TX_CH, DMA_INT_FLAG_FTF);
         dma_channel_disable(USART_DMA, USART_DMA_TX_CH);
-        usart_dma_transmit_config(USART_UX, USART_TRANSMIT_DMA_DISABLE);
-        usart_interrupt_enable(USART_UX, USART_INT_TC);
+        usart_dma_transmit_config(huart->Instance, USART_TRANSMIT_DMA_DISABLE);
+        usart_interrupt_enable(huart->Instance, USART_INT_TC);
     }
 }
 
@@ -339,6 +346,7 @@ void USART_DMA_TX_IRQHandler(void)
 static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char parity, int stop)
 {
     struct UART_Data *uart_data = pDev->priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
 
     /* main 里已用设备方式初始化过，重复调用直接返回，避免重复建对象和重启 DMA */
     if (g_uart_dev_ready)
@@ -369,27 +377,27 @@ static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char pa
 
 #if UART_DMA_MODE
     /* DMA 接收时不能开 RBNE 中断，否则会与 DMA 抢数据 */
-    usart_interrupt_disable(USART_UX, USART_INT_RBNE);
+    usart_interrupt_disable(huart->Instance, USART_INT_RBNE);
     gd32_uart_dma_config();
-    usart_flag_clear(USART_UX, USART_FLAG_TC);
+    usart_flag_clear(huart->Instance, USART_FLAG_TC);
 
     /* 优先级数值必须 >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY(5)，才能调用 FromISR API */
     nvic_irq_enable(USART_UX_IRQn, 6, 0);
 
     g_uart_dev_ready = 1;
-    usart_interrupt_enable(USART_UX, USART_INT_IDLE);
-    usart_dma_receive_config(USART_UX, USART_RECEIVE_DMA_ENABLE);
+    usart_interrupt_enable(huart->Instance, USART_INT_IDLE);
+    usart_dma_receive_config(huart->Instance, USART_RECEIVE_DMA_ENABLE);
     gd32_uart_rx_dma_restart();
 #endif
 
 #if UART_INTERRUPT_MODE
     nvic_irq_enable(USART_UX_IRQn, 6, 0);
     g_uart_dev_ready = 1;
-    usart_interrupt_enable(USART_UX, USART_INT_RBNE);
+    usart_interrupt_enable(huart->Instance, USART_INT_RBNE);
 #endif
 
 #if UART_DELAY_MODE
-    usart_interrupt_disable(USART_UX, USART_INT_RBNE);
+    usart_interrupt_disable(huart->Instance, USART_INT_RBNE);
     nvic_irq_disable(USART_UX_IRQn);
     g_uart_dev_ready = 1;
 #endif
@@ -400,6 +408,7 @@ static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char pa
 static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms)
 {
     struct UART_Data *uart_data = pDev->priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
 
     /* 加互斥锁，避免多任务同时发送 */
     if (pdTRUE != xSemaphoreTake(uart_data->xTxMutex, (TickType_t)timeout_ms))
@@ -410,10 +419,10 @@ static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int
 #if UART_DELAY_MODE
     for (int i = 0; i < len; i++)
     {
-        while (RESET == usart_flag_get(USART_UX, USART_FLAG_TBE));
-        usart_data_transmit(USART_UX, datas[i]);
+        while (RESET == usart_flag_get(huart->Instance, USART_FLAG_TBE));
+        usart_data_transmit(huart->Instance, datas[i]);
     }
-    while (RESET == usart_flag_get(USART_UX, USART_FLAG_TC));
+    while (RESET == usart_flag_get(huart->Instance, USART_FLAG_TC));
     xSemaphoreGive(uart_data->xTxMutex);
     return 0;
 #else
@@ -421,23 +430,23 @@ static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int
     xSemaphoreTake(uart_data->xTxSem, 0);
 
 #if UART_DMA_MODE
-    usart_flag_clear(USART_UX, USART_FLAG_TC);
+    usart_flag_clear(huart->Instance, USART_FLAG_TC);
     dma_channel_disable(USART_DMA, USART_DMA_TX_CH);
     dma_flag_clear(USART_DMA, USART_DMA_TX_CH, DMA_FLAG_FTF | DMA_FLAG_HTF);
     dma_memory_address_config(USART_DMA, USART_DMA_TX_CH, DMA_MEMORY_0, (uint32_t)datas);
     dma_transfer_number_config(USART_DMA, USART_DMA_TX_CH, (uint32_t)len);
     /* 先把 CPU 写在 cache 里的数据回写到内存，否则 DMA 可能发出旧数据 */
     SCB_CleanDCache_by_Addr((uint32_t *)datas, len);
-    usart_dma_transmit_config(USART_UX, USART_TRANSMIT_DMA_ENABLE);
+    usart_dma_transmit_config(huart->Instance, USART_TRANSMIT_DMA_ENABLE);
     dma_channel_enable(USART_DMA, USART_DMA_TX_CH);
 #endif
 
 #if UART_INTERRUPT_MODE
-    usart_flag_clear(USART_UX, USART_FLAG_TC);
+    usart_flag_clear(huart->Instance, USART_FLAG_TC);
     uart_data->handle->pTxBuffPtr  = datas;
     uart_data->handle->TxXferSize  = (uint16_t)len;
     uart_data->handle->TxXferCount = (uint16_t)len;
-    usart_interrupt_enable(USART_UX, USART_INT_TBE);
+    usart_interrupt_enable(huart->Instance, USART_INT_TBE);
 #endif
 
     /* 等待发送完毕 */
@@ -449,13 +458,13 @@ static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int
 
     /* 超时：中止本次发送 */
 #if UART_DMA_MODE
-    usart_dma_transmit_config(USART_UX, USART_TRANSMIT_DMA_DISABLE);
+    usart_dma_transmit_config(huart->Instance, USART_TRANSMIT_DMA_DISABLE);
     dma_channel_disable(USART_DMA, USART_DMA_TX_CH);
 #endif
 #if UART_INTERRUPT_MODE
-    usart_interrupt_disable(USART_UX, USART_INT_TBE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TBE);
 #endif
-    usart_interrupt_disable(USART_UX, USART_INT_TC);
+    usart_interrupt_disable(huart->Instance, USART_INT_TC);
     xSemaphoreTake(uart_data->xTxSem, 0);
     xSemaphoreGive(uart_data->xTxMutex);
     return -1;
@@ -464,9 +473,9 @@ static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int
 
 static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_ms)
 {
-#if !UART_DELAY_MODE
     struct UART_Data *uart_data = pDev->priv_data;
 
+#if !UART_DELAY_MODE
     /* 中断里写队列，这里从队列取数据；timeout_ms 直接作为 tick 使用 */
     if (pdPASS == xQueueReceive(uart_data->xRxQueue, data, (TickType_t)timeout_ms))
     {
@@ -476,9 +485,10 @@ static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_m
 #else
     /* 对照 STM32 的 HAL_UART_Receive：阻塞查询，期间不让出 CPU。
        不能 vTaskDelay(1)，1ms 的轮询间隔会漏掉连发的后续字节 */
+    UART_HandleTypeDef *huart = uart_data->handle;
     TickType_t start = xTaskGetTickCount();
 
-    while (usart_flag_get(USART_UX, USART_FLAG_RBNE) == RESET)
+    while (usart_flag_get(huart->Instance, USART_FLAG_RBNE) == RESET)
     {
         if ((xTaskGetTickCount() - start) >= (TickType_t)timeout_ms)
         {
@@ -486,7 +496,7 @@ static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_m
         }
     }
 
-    *data = (uint8_t)usart_data_receive(USART_UX);
+    *data = (uint8_t)usart_data_receive(huart->Instance);
     return 0;
 #endif
 }
