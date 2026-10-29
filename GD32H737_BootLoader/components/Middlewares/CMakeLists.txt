@@ -5,8 +5,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 
 
-
-
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/include"
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/portable/GCC/ARM_CM7/r0p1"
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/config"
@@ -40,8 +38,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     
 )
 target_sources(${PROJECT_NAME} PRIVATE
-
-
 
 
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/source/croutine.c"

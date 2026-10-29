@@ -37,16 +37,24 @@ typedef struct image_header {
 #define BOOT_UART_TX_PIN    GPIO_PIN_9
 #define BOOT_UART_TX_AF     GPIO_AF_7
 #define BOOT_UART_TX_CLK    RCU_GPIOA
+#define BOOT_UART_RX_PORT   GPIOA
+#define BOOT_UART_RX_PIN    GPIO_PIN_10
+#define BOOT_UART_RX_AF     GPIO_AF_7
+#define BOOT_UART_RX_CLK    RCU_GPIOA
 #define BOOT_UART_BAUD      115200U
 
 static void boot_uart_init(void)
 {
     rcu_periph_clock_enable(BOOT_UART_TX_CLK);
+    rcu_periph_clock_enable(BOOT_UART_RX_CLK);
     rcu_periph_clock_enable(BOOT_UART_CLK);
 
     gpio_af_set(BOOT_UART_TX_PORT, BOOT_UART_TX_AF, BOOT_UART_TX_PIN);
     gpio_mode_set(BOOT_UART_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, BOOT_UART_TX_PIN);
     gpio_output_options_set(BOOT_UART_TX_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_100_220MHZ, BOOT_UART_TX_PIN);
+
+    gpio_af_set(BOOT_UART_RX_PORT, BOOT_UART_RX_AF, BOOT_UART_RX_PIN);
+    gpio_mode_set(BOOT_UART_RX_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, BOOT_UART_RX_PIN);
 
     usart_deinit(BOOT_UART);
     usart_baudrate_set(BOOT_UART, BOOT_UART_BAUD);
@@ -54,21 +62,31 @@ static void boot_uart_init(void)
     usart_word_length_set(BOOT_UART, USART_WL_8BIT);
     usart_parity_config(BOOT_UART, USART_PM_NONE);
     usart_transmit_config(BOOT_UART, USART_TRANSMIT_ENABLE);
+    usart_receive_config(BOOT_UART, USART_RECEIVE_ENABLE);
     usart_enable(BOOT_UART);
 }
 
-static void boot_putc(uint8_t c)
+void boot_putc(uint8_t c)
 {
     while(RESET == usart_flag_get(BOOT_UART, USART_FLAG_TC)) {
     }
     usart_data_transmit(BOOT_UART, c);
 }
 
-static void boot_puts(const char *s)
+void boot_puts(const char *s)
 {
     while('\0' != *s) {
         boot_putc((uint8_t)*s++);
     }
+}
+
+/* 非阻塞读：已收到字节返回 0~255，无数据返回 -1 */
+int boot_getc(void)
+{
+    if(RESET == usart_flag_get(BOOT_UART, USART_FLAG_RBNE)) {
+        return -1;
+    }
+    return (int)usart_data_receive(BOOT_UART);
 }
 
 /* 等最后一个字节真正移出，避免跳转后 App 重配串口把它掐掉 */
