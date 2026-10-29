@@ -15,6 +15,36 @@
 #include <string.h>
 #include <stdint.h>
 
+/*******************************************************************************************************/
+/* 引脚和串口 定义 */
+
+#define USART_TX_GPIO_PORT              GPIOA
+#define USART_TX_GPIO_PIN               GPIO_PIN_9
+#define USART_TX_GPIO_AF                GPIO_AF_7
+#define USART_TX_GPIO_CLK               RCU_GPIOA   /* GPIOA时钟使能 */
+
+#define USART_RX_GPIO_PORT              GPIOA
+#define USART_RX_GPIO_PIN               GPIO_PIN_10
+#define USART_RX_GPIO_AF                GPIO_AF_7
+#define USART_RX_GPIO_CLK               RCU_GPIOA   /* GPIOA时钟使能 */
+
+#define USART_UX                        USART0
+#define USART_UX_IRQn                   USART0_IRQn
+#define USART_UX_IRQHandler             USART0_IRQHandler
+#define USART_UX_CLK                    RCU_USART0  /* USART0 时钟使能 */
+
+/* 串口 DMA 配置：GD32H7 的请求由 DMAMUX 路由，通道可任选 */
+#define USART_DMA                       DMA0
+#define USART_DMA_RX_CH                 DMA_CH1
+#define USART_DMA_TX_CH                 DMA_CH2
+#define USART_DMA_RX_IRQn               DMA0_Channel1_IRQn
+#define USART_DMA_TX_IRQn               DMA0_Channel2_IRQn
+#define USART_DMA_RX_IRQHandler         DMA0_Channel1_IRQHandler
+#define USART_DMA_TX_IRQHandler         DMA0_Channel2_IRQHandler
+#define USART_DMA_REQUEST_RX            DMA_REQUEST_USART0_RX
+#define USART_DMA_REQUEST_TX            DMA_REQUEST_USART0_TX
+
+
 /* 设备是否已完成初始化（互斥锁/信号量/队列是否已建好） */
 static uint8_t g_uart_dev_ready = 0;
 

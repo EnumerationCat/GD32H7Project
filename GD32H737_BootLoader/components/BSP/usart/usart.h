@@ -23,35 +23,6 @@
 #include "stdio.h"
 #include "sys.h"
 
-/*******************************************************************************************************/
-/* 引脚和串口 定义 */
-
-#define USART_TX_GPIO_PORT              GPIOA
-#define USART_TX_GPIO_PIN               GPIO_PIN_9
-#define USART_TX_GPIO_AF                GPIO_AF_7
-#define USART_TX_GPIO_CLK               RCU_GPIOA   /* GPIOA时钟使能 */
-
-#define USART_RX_GPIO_PORT              GPIOA
-#define USART_RX_GPIO_PIN               GPIO_PIN_10
-#define USART_RX_GPIO_AF                GPIO_AF_7
-#define USART_RX_GPIO_CLK               RCU_GPIOA   /* GPIOA时钟使能 */
-
-#define USART_UX                        USART0
-#define USART_UX_IRQn                   USART0_IRQn
-#define USART_UX_IRQHandler             USART0_IRQHandler
-#define USART_UX_CLK                    RCU_USART0  /* USART0 时钟使能 */
-
-/* 串口 DMA 配置：GD32H7 的请求由 DMAMUX 路由，通道可任选 */
-#define USART_DMA                       DMA0
-#define USART_DMA_RX_CH                 DMA_CH1
-#define USART_DMA_TX_CH                 DMA_CH2
-#define USART_DMA_RX_IRQn               DMA0_Channel1_IRQn
-#define USART_DMA_TX_IRQn               DMA0_Channel2_IRQn
-#define USART_DMA_RX_IRQHandler         DMA0_Channel1_IRQHandler
-#define USART_DMA_TX_IRQHandler         DMA0_Channel2_IRQHandler
-#define USART_DMA_REQUEST_RX            DMA_REQUEST_USART0_RX
-#define USART_DMA_REQUEST_TX            DMA_REQUEST_USART0_TX
-
 #define USART_EN_RX                 1               /* 使能（1）/禁止（0）串口接收 */
 /* 串口printf重定向配置：1=使能开启，0=禁用关闭 */
 #define USART_SUPPORT_PRINTF    1
