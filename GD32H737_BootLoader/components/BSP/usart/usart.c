@@ -23,6 +23,21 @@ static UART_HandleTypeDef g_gd32_uart0_handle = {
     USART_UX, NULL, 0, 0
 };
 
+struct UART_Data {
+    UART_HandleTypeDef *handle;
+    SemaphoreHandle_t   xTxSem;   /* 发送完成信号量 */
+    SemaphoreHandle_t   xTxMutex; /* 发送互斥锁 */
+    QueueHandle_t       xRxQueue; /* 接收队列，每项 1 字节 */
+    /* 32 字节对齐：AXI SRAM 是 cacheable，DMA 前后需要按 cache 行做维护 */
+    uint8_t             rxdata[UART_BUFFER_SIZE] __attribute__((aligned(32)));
+    volatile int        read_index;
+};
+
+static struct UART_Data   g_gd32_uart0_data = {
+    &g_gd32_uart0_handle, NULL, NULL, NULL, {0}, 0
+};
+static struct UART_Device gd32_uart0;
+
 
 #if USART_SUPPORT_PRINTF
 
@@ -66,7 +81,8 @@ int _read(int file, char *ptr, int len)
 /*GCC 重定向 write 函数，printf 最终调用此函数 */
 int _write(int file, char *ptr, int len)
 {
-    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
     int i;
 
     /* 调度器已运行、设备已初始化，且不在中断/临界区内：走 UART_Device 发送，
@@ -104,7 +120,8 @@ int _write(int file, char *ptr, int len)
  */
 void usart_init(uint32_t baudrate)
 {
-    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
 
     /* IO 及 时钟配置 */
     rcu_periph_clock_enable(USART_TX_GPIO_CLK);     /* 使能串口TX脚时钟 */
@@ -146,22 +163,8 @@ void usart_init(uint32_t baudrate)
 /*                        UART_Device 设备抽象                  */
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-struct UART_Data {
-    UART_HandleTypeDef *handle;
-    SemaphoreHandle_t   xTxSem;   /* 发送完成信号量 */
-    SemaphoreHandle_t   xTxMutex; /* 发送互斥锁 */
-    QueueHandle_t       xRxQueue; /* 接收队列，每项 1 字节 */
-    /* 32 字节对齐：AXI SRAM 是 cacheable，DMA 前后需要按 cache 行做维护 */
-    uint8_t             rxdata[UART_BUFFER_SIZE] __attribute__((aligned(32)));
-    volatile int        read_index;
-};
-
-static struct UART_Data   g_gd32_uart0_data = {
-    &g_gd32_uart0_handle, NULL, NULL, NULL, {0}, 0
-};
-static struct UART_Device gd32_uart0;
-
 static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char parity, int stop);
+static int gd32_uart_deinit(struct UART_Device *pDev);
 static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms);
 static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_ms);
 
@@ -171,7 +174,8 @@ static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_m
 /* 配置 USART0 的 RX/TX DMA 通道 */
 static void gd32_uart_dma_config(void)
 {
-    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
     dma_single_data_parameter_struct dma_cfg;
 
     rcu_periph_clock_enable(RCU_DMA0);
@@ -184,7 +188,7 @@ static void gd32_uart_dma_config(void)
     dma_cfg.request             = USART_DMA_REQUEST_RX;
     dma_cfg.periph_addr         = (uint32_t)&USART_RDATA(huart->Instance);
     dma_cfg.periph_inc          = DMA_PERIPH_INCREASE_DISABLE;
-    dma_cfg.memory0_addr        = (uint32_t)g_gd32_uart0_data.rxdata;
+    dma_cfg.memory0_addr        = (uint32_t)uart_data->rxdata;
     dma_cfg.memory_inc          = DMA_MEMORY_INCREASE_ENABLE;
     dma_cfg.periph_memory_width = DMA_PERIPH_WIDTH_8BIT;
     dma_cfg.circular_mode       = DMA_CIRCULAR_MODE_DISABLE;
@@ -216,19 +220,21 @@ static void gd32_uart_dma_config(void)
 /* 重新装载接收 DMA（每次空闲/接收满后调用） */
 static void gd32_uart_rx_dma_restart(void)
 {
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
+
     dma_channel_disable(USART_DMA, USART_DMA_RX_CH);
     dma_flag_clear(USART_DMA, USART_DMA_RX_CH, DMA_FLAG_FTF | DMA_FLAG_HTF);
     dma_memory_address_config(USART_DMA, USART_DMA_RX_CH, DMA_MEMORY_0,
-                              (uint32_t)g_gd32_uart0_data.rxdata);
+                              (uint32_t)uart_data->rxdata);
     dma_transfer_number_config(USART_DMA, USART_DMA_RX_CH, UART_BUFFER_SIZE);
     dma_channel_enable(USART_DMA, USART_DMA_RX_CH);
-    g_gd32_uart0_data.read_index = 0;
+    uart_data->read_index = 0;
 }
 
 /* 把 DMA 收到的数据写入队列，然后重新启动接收 */
 static void gd32_uart_rx_dma_process(BaseType_t *woken)
 {
-    struct UART_Data *uart_data = &g_gd32_uart0_data;
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
     int rx_len;
     int i;
 
@@ -254,13 +260,14 @@ static void gd32_uart_rx_dma_process(BaseType_t *woken)
 /* 串口全局中断：设备模式下处理 IDLE / TC（中断模式下处理 RBNE / TBE） */
 void USART_UX_IRQHandler(void)
 {
-    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
     BaseType_t woken = pdFALSE;
 
     if (g_uart_dev_ready)
     {
-#if !UART_DELAY_MODE
-        struct UART_Data *uart_data = &g_gd32_uart0_data;
+#if UART_DELAY_MODE
+        (void)uart_data;
 #endif
 
 #if UART_DMA_MODE
@@ -329,7 +336,8 @@ void USART_DMA_RX_IRQHandler(void)
 /* 发送 DMA 传输完成：数据已全部写入 TDATA，再等 USART 的 TC 表示线上发完 */
 void USART_DMA_TX_IRQHandler(void)
 {
-    UART_HandleTypeDef *huart = &g_gd32_uart0_handle;
+    struct UART_Data *uart_data = gd32_uart0.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
 
     if (dma_interrupt_flag_get(USART_DMA, USART_DMA_TX_CH, DMA_INT_FLAG_FTF) != RESET)
     {
@@ -502,9 +510,63 @@ static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_m
 }
 
 
+static int gd32_uart_deinit(struct UART_Device *pDev)
+{
+    struct UART_Data *uart_data = pDev->priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
+
+    /* 先关中断源和 NVIC，保证下面拆对象时没有 ISR 再来访问 */
+    usart_interrupt_disable(huart->Instance, USART_INT_RBNE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TBE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TC);
+    usart_interrupt_disable(huart->Instance, USART_INT_IDLE);
+    nvic_irq_disable(USART_UX_IRQn);
+
+#if UART_DMA_MODE
+    usart_dma_receive_config(huart->Instance, USART_RECEIVE_DMA_DISABLE);
+    usart_dma_transmit_config(huart->Instance, USART_TRANSMIT_DMA_DISABLE);
+    dma_channel_disable(USART_DMA, USART_DMA_RX_CH);
+    dma_channel_disable(USART_DMA, USART_DMA_TX_CH);
+    nvic_irq_disable(USART_DMA_RX_IRQn);
+    nvic_irq_disable(USART_DMA_TX_IRQn);
+    dma_deinit(USART_DMA, USART_DMA_RX_CH);
+    dma_deinit(USART_DMA, USART_DMA_TX_CH);
+#endif
+
+    usart_deinit(huart->Instance);
+
+    /* 清就绪标志：之后 printf 会退回轮询发送，避免再走已释放的队列/信号量 */
+    g_uart_dev_ready = 0;
+
+    /* 释放 RTOS 对象：调用前须确保没有任务阻塞在 Send/Recv 上 */
+    if (NULL != uart_data->xTxSem)
+    {
+        vSemaphoreDelete(uart_data->xTxSem);
+        uart_data->xTxSem = NULL;
+    }
+    if (NULL != uart_data->xRxQueue)
+    {
+        vQueueDelete(uart_data->xRxQueue);
+        uart_data->xRxQueue = NULL;
+    }
+    if (NULL != uart_data->xTxMutex)
+    {
+        vSemaphoreDelete(uart_data->xTxMutex);
+        uart_data->xTxMutex = NULL;
+    }
+
+    huart->pTxBuffPtr  = NULL;
+    huart->TxXferSize  = 0;
+    huart->TxXferCount = 0;
+
+    return 0;
+}
+
+
 static struct UART_Device gd32_uart0 = {
     "gd32_uart0",
     gd32_uart_init,
+    gd32_uart_deinit,
     gd32_uart_send,
     gd32_uart_recv,
     &g_gd32_uart0_data

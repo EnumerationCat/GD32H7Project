@@ -90,6 +90,7 @@ typedef struct
 struct UART_Device {
     char *name;
     int (*Init)(struct UART_Device *pDev, int baud, int datas, char parity, int stop);
+    int (*DeInit)(struct UART_Device *pDev);
     int (*Send)(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms);
     int (*Recv)(struct UART_Device *pDev, uint8_t *data, int timeout_ms);
     void *priv_data;
