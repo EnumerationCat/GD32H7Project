@@ -13,7 +13,7 @@
 #define __RING_BUFFER_H
 
 
-#define BUFFER_SIZE 128        /* 环形缓冲区的大小 */
+#define BUFFER_SIZE 4096       /* 环形缓冲区的大小（ZMODEM 连续收包需要足够深度） */
 typedef struct
 {
     unsigned char buffer[BUFFER_SIZE];  /* 缓冲区空间 */

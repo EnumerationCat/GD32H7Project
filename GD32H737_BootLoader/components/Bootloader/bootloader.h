@@ -17,7 +17,13 @@ int  bootloader_app_is_valid(uint32_t image_base, uint32_t *app_base);
 /* 把控制权交给 app_base 处的 App，不返回 */
 void bootloader_jump_to_app(uint32_t app_base);
 
-/* 调试串口（USART0 / PA9 TX / PA10 RX / 115200-8-N-1）轮询收发，供 shell 等使用 */
+/* 调试串口（USART0 / PA9 TX / PA10 RX / 115200-8-N-1）
+   发送轮询，接收由 RX 中断写入 ring buffer，此处非阻塞取字节 */
 void boot_putc(uint8_t c);
 void boot_puts(const char *s);
-int  boot_getc(void);
+int  boot_getc(void);                                  /* 无数据返回 -1 */
+int  boot_getc_timeout(uint32_t timeout_ms);           /* 超时返回 -1，否则 0~255 */
+
+/* 无格式化输出的整数打印 */
+void boot_putdec(uint32_t v);
+void boot_puthex32(uint32_t v);

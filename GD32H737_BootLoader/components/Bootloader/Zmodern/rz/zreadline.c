@@ -91,9 +91,9 @@ zreadline_getc(zreadline_t *zr, int timeout)
 static int
 readline_internal(zreadline_t *zr, unsigned int timeout)
 {
-//	return TIMEOUT;
-	char c = getchar2();
-	return (unsigned char) c;
+	(void)zr;
+	/* timeout 单位是十分之一秒，转成毫秒交给 UART 适配层 */
+	return zport_getc((int)timeout * 100);
 }
 
 

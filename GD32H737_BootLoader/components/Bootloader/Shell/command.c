@@ -1,6 +1,7 @@
 #include "command.h"
 #include "help_cmd.h"
 #include "boot_cmd.h"
+#include "mrz.h"
 #include "string.h"
 
 static struct command * g_commands[] = {
@@ -8,6 +9,7 @@ static struct command * g_commands[] = {
 	&boot_cmd,
 	&jump_cmd,
 	&exit_cmd,
+	&rz_cmd,
 	NULL
 };
 

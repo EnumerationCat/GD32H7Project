@@ -1,5 +1,6 @@
 #include "bootloader.h"
 #include "shell.h"
+#include "ring_buffer.h"
 #include "gd32h7xx.h"
 #include "gd32h7xx_fmc.h"
 
@@ -44,6 +45,9 @@ typedef struct image_header {
 #define BOOT_UART_RX_CLK    RCU_GPIOA
 #define BOOT_UART_BAUD      115200U
 
+/* RX 中断只写、主循环只读：单生产者/单消费者，无需额外加锁 */
+static ring_buffer g_uart_rx;
+
 static void boot_uart_init(void)
 {
     rcu_periph_clock_enable(BOOT_UART_TX_CLK);
@@ -64,7 +68,25 @@ static void boot_uart_init(void)
     usart_parity_config(BOOT_UART, USART_PM_NONE);
     usart_transmit_config(BOOT_UART, USART_TRANSMIT_ENABLE);
     usart_receive_config(BOOT_UART, USART_RECEIVE_ENABLE);
+
+    /* 接收走中断 + ring buffer，避免轮询丢字节（ZMODEM 连续数据必需） */
+    ring_buffer_init(&g_uart_rx);
+    usart_interrupt_enable(BOOT_UART, USART_INT_RBNE);
+    nvic_irq_enable(USART0_IRQn, 1U, 0U);
+
     usart_enable(BOOT_UART);
+}
+
+/* USART0 RX：读走数据即清 RBNE；ORE 表示硬件丢字节，一并清掉防止卡死 */
+void USART0_IRQHandler(void)
+{
+    if(RESET != usart_interrupt_flag_get(BOOT_UART, USART_INT_FLAG_RBNE)) {
+        unsigned char c = (unsigned char)usart_data_receive(BOOT_UART);
+        ring_buffer_write(c, &g_uart_rx);
+    }
+    if(RESET != usart_flag_get(BOOT_UART, USART_FLAG_ORERR)) {
+        usart_flag_clear(BOOT_UART, USART_FLAG_ORERR);
+    }
 }
 
 void boot_putc(uint8_t c)
@@ -84,10 +106,40 @@ void boot_puts(const char *s)
 /* 非阻塞读：已收到字节返回 0~255，无数据返回 -1 */
 int boot_getc(void)
 {
-    if(RESET == usart_flag_get(BOOT_UART, USART_FLAG_RBNE)) {
+    unsigned char c;
+
+    if(0 != ring_buffer_read(&c, &g_uart_rx)) {
         return -1;
     }
-    return (int)usart_data_receive(BOOT_UART);
+    return (int)c;
+}
+
+/* 带超时读：超时返回 -1；timeout_ms 为 0 时等价于 boot_getc() */
+int boot_getc_timeout(uint32_t timeout_ms)
+{
+    int c = boot_getc();
+
+    if((c >= 0) || (0U == timeout_ms)) {
+        return c;
+    }
+
+    /* 一次性 1ms SysTick 计时，用完即关，避免影响 jump_to_app */
+    SysTick->LOAD = (SystemCoreClock / 1000U) - 1U;
+    SysTick->VAL  = 0U;
+    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+
+    for(uint32_t elapsed = 0U; elapsed < timeout_ms; elapsed++) {
+        while(0U == (SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk)) {
+        }
+        c = boot_getc();
+        if(c >= 0) {
+            SysTick->CTRL = 0U;
+            return c;
+        }
+    }
+
+    SysTick->CTRL = 0U;
+    return -1;
 }
 
 /* SysTick 轮询计时：不启用中断，跳转前 jump_to_app 会把它关掉 */
@@ -107,7 +159,7 @@ static void boot_delay_ms(uint32_t ms)
     SysTick->CTRL = 0U;
 }
 
-static void boot_putdec(uint32_t v)
+void boot_putdec(uint32_t v)
 {
     char buf[10];
     int i = 0;
@@ -169,7 +221,7 @@ static void boot_uart_flush(void)
     }
 }
 
-static void boot_puthex32(uint32_t v)
+void boot_puthex32(uint32_t v)
 {
     static const char hex[] = "0123456789ABCDEF";
     boot_puts("0x");

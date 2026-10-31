@@ -24,8 +24,12 @@
   02111-1307, USA.
 */
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #include "config.h"
 
+#include "zport.h"
 #include "zreadline.h"
 
 //#define time_t int

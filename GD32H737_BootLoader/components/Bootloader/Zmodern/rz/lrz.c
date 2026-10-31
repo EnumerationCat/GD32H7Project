@@ -117,8 +117,8 @@ struct rz_ {
 
 	bool (*tick_cb)(const char *fname, long bytes_sent, long bytes_total,
 			long last_bps, int min_left, int sec_left);
-	void (*complete_cb)(const char *filename, int result, size_t size, time_t date);
-	bool (*approver_cb)(const char *filename, size_t size, time_t date);
+	void (*complete_cb)(const char *filename, int result, size_t size, unsigned int date);
+	bool (*approver_cb)(const char *filename, size_t size, unsigned int date);
 
 
 };
@@ -135,8 +135,8 @@ rz_t *rz_init(int fd, size_t readnum, size_t bufsize, int no_timeout,
 	      int o_sync, int tcp_flag, int topipe,
 	      bool tick_cb(const char *fname, long bytes_sent, long bytes_total,
 			   long last_bps, int min_left, int sec_left),
-	      void complete_cb(const char *filename, int result, size_t size, time_t date),
-	      bool approver_cb(const char *filename, size_t size, time_t date)
+	      void complete_cb(const char *filename, int result, size_t size, unsigned int date),
+	      bool approver_cb(const char *filename, size_t size, unsigned int date)
 );
 
 
@@ -171,8 +171,8 @@ rz_init(int fd, size_t readnum, size_t bufsize, int no_timeout,
 	int makelcpathname, int rxclob, int o_sync, int tcp_flag, int topipe,
 	bool tick_cb(const char *fname, long bytes_sent, long bytes_total,
 		     long last_bps, int min_left, int sec_left),
-	void complete_cb(const char *filename, int result, size_t size, time_t date),
-	bool approver_cb(const char *filename, size_t size, time_t date)
+	void complete_cb(const char *filename, int result, size_t size, unsigned int date),
+	bool approver_cb(const char *filename, size_t size, unsigned int date)
 	)
 {
 	rz_t *rz = &g_rz; //(rz_t *)malloc(sizeof(rz_t));
@@ -241,7 +241,7 @@ size_t zmodem_receive(const char *directory,
 			   8192, /* readnum */
 			   16384, /* bufsize */
 			   1, /* no_timeout */
-			   100,		 /* rxtimeout */
+			   30,		 /* rxtimeout: 3 秒，兼顾 bootloader 交互体验 */
 			   0,		 /* znulls */
 			   0,		 /* eflag */
 			   2400,	 /* baudrate */
@@ -280,7 +280,7 @@ size_t zmodem_receive(const char *directory,
 		log_info(_("Transfer complete"));
 	//exit(exitcode);
 
-	return 0u;
+	return zmodem_file_size();
 }
 
 
@@ -368,22 +368,22 @@ rz_receive_pathname(rz_t *rz, struct zm_fileinfo *zi, char *rpn)
 et_tu:
 	rz->firstsec=TRUE;
 	zi->eof_seen=FALSE;
-	putchar(WANTCRC);
-	fflush(stdout);
+	zport_putc(WANTCRC);
+	zport_flush();
 	zreadline_flushline(rz->zm->zr); /* Do read next time ... */
 	while ((c = rz_receive_sector(rz, &Blklen, rpn, 100)) != 0) {
 		if (c == WCEOT) {
 			log_error( _("Pathname fetch returned EOT"));
-			putchar(ACK);
-			fflush(stdout);
+			zport_putc(ACK);
+			zport_flush();
 			zreadline_flushline(rz->zm->zr);	/* Do read next time ... */
 			zreadline_getc(rz->zm->zr, 1);
 			goto et_tu;
 		}
 		return ERROR;
 	}
-	putchar(ACK);
-	fflush(stdout);
+	zport_putc(ACK);
+	zport_flush();
 	return OK;
 }
 
@@ -403,8 +403,8 @@ rz_receive_sectors(rz_t *rz, struct zm_fileinfo *zi)
 	sendchar=WANTCRC;
 
 	for (;;) {
-		putchar(sendchar);	/* send it now, we're ready! */
-		fflush(stdout);
+		zport_putc(sendchar);	/* send it now, we're ready! */
+		zport_flush();
 		zreadline_flushline(rz->zm->zr);	/* Do read next time ... */
 		sectcurr=rz_receive_sector(rz, &Blklen, rz->secbuf,
 			(unsigned int) ((sectnum&0177) ? 50 : 130));
@@ -425,8 +425,8 @@ rz_receive_sectors(rz_t *rz, struct zm_fileinfo *zi)
 		else if (sectcurr==WCEOT) {
 			if (rz_closeit(rz, zi))
 				return ERROR;
-			putchar(ACK);
-			fflush(stdout);
+			zport_putc(ACK);
+			zport_flush();
 			zreadline_flushline(rz->zm->zr);	/* Do read next time ... */
 			return OK;
 		}
@@ -519,13 +519,13 @@ humbug:
 				;
 		}
 		if (rz->firstsec) {
-			putchar(WANTCRC);
-			fflush(stdout);
+			zport_putc(WANTCRC);
+			zport_flush();
 			zreadline_flushline(rz->zm->zr);	/* Do read next time ... */
 		} else {
 			maxtime=40;
-			putchar(NAK);
-			fflush(stdout);
+			zport_putc(NAK);
+			zport_flush();
 			zreadline_flushline(rz->zm->zr);	/* Do read next time ... */
 		}
 	}
@@ -544,7 +544,7 @@ rz_process_header(rz_t *rz, char *name, struct zm_fileinfo *zi)
 	const char *openmode;
 	char *p;
 	//static char *name_static=NULL;
-	static char name_static[20];
+	static char name_static[128];
 	char *nameend;
 
 	//if (name_static)
@@ -566,6 +566,10 @@ rz_process_header(rz_t *rz, char *name, struct zm_fileinfo *zi)
 	//	log_fatal(_("out of memory"));
 	//	exit(1);
 	//}
+	if (strlen(name) >= sizeof(name_static)) {
+		log_info(_("file name too long, skipped: %s"), name);
+		return ERROR;
+	}
 	strcpy(name_static,name);
 	zi->fname=name_static;
 

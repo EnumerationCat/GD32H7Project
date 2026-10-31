@@ -39,7 +39,6 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "string.h"
-#include <uart.h>
 #include "log.h"
 #include "crctab.h"
 #include "zm.h"
@@ -296,28 +295,28 @@ zm_put_escaped_char(zm_t *zm, int c)
 	switch(zm->escape_sequence_table[(unsigned) (c&=0xFF)])
 	{
 	case ZM_ESCAPE_NEVER:
-		putchar(zm->lastsent = c);
+		zport_putc(zm->lastsent = c);
 		break;
 	case ZM_ESCAPE_ALWAYS:
-		putchar(ZDLE);
+		zport_putc(ZDLE);
 		/* Spec 7.2: The receiving program decodes any sequence
 		 * of ZDLE followed by a byte with bit 6 set and bit 5 reset
 		 * (uppercase letter, either parity) to the equivalent control
 		 * character by inverting bit 6 */
 		c ^= 0100;
-		putchar(zm->lastsent = c);
+		zport_putc(zm->lastsent = c);
 		break;
 	case ZM_ESCAPE_AFTER_AMPERSAND:
 		if ((zm->lastsent & 0x7F) != '@') {
-			putchar(zm->lastsent = c);
+			zport_putc(zm->lastsent = c);
 		} else {
-			putchar(ZDLE);
+			zport_putc(ZDLE);
 		/* Spec 7.2: The receiving program decodes any sequence
 		 * of ZDLE followed by a byte with bit 6 set and bit 5 reset
 		 * (uppercase letter, either parity) to the equivalent control
 		 * character by inverting bit 6 */
 			c ^= 0100;
-			putchar(zm->lastsent = c);
+			zport_putc(zm->lastsent = c);
 		}
 		break;
 	}
@@ -337,7 +336,7 @@ zm_put_escaped_string (zm_t *zm, const char *s, size_t count)
 			t++;
 		}
 		if (t!=s) {
-			fwrite(s,(size_t)(t-s),1,stdout);
+			zport_write(s,(size_t)(t-s));
 			zm->lastsent=t[-1];
 			s=t;
 		}
@@ -345,20 +344,20 @@ zm_put_escaped_string (zm_t *zm, const char *s, size_t count)
 			int c=*s;
 			switch(last_esc) {
 			case 0:
-				putchar(zm->lastsent = c);
+				zport_putc(zm->lastsent = c);
 				break;
 			case 1:
-				putchar(ZDLE);
+				zport_putc(ZDLE);
 				c ^= 0100;
-				putchar(zm->lastsent = c);
+				zport_putc(zm->lastsent = c);
 				break;
 			case 2:
 				if ((zm->lastsent & 0x7F) != '@') {
-					putchar(zm->lastsent = c);
+					zport_putc(zm->lastsent = c);
 				} else {
-					putchar(ZDLE);
+					zport_putc(ZDLE);
 					c ^= 0100;
-					putchar(zm->lastsent = c);
+					zport_putc(zm->lastsent = c);
 				}
 				break;
 			}
@@ -377,10 +376,10 @@ zm_send_binary_header(zm_t *zm, int type)
 	log_trace("zm_send_binary_header: %s %lx", frametypes[type+FTOFFSET], zm_reclaim_send_header(zm));
 	if (type == ZDATA)
 		for (int n = 0; n < zm->znulls; n ++)
-			putchar(0);
+			zport_putc(0);
 
-	putchar(ZPAD);
-	putchar(ZDLE);
+	zport_putc(ZPAD);
+	zport_putc(ZDLE);
 
 	zm->crc32t = zm->txfcs32;
 	if (zm->crc32t)
@@ -388,7 +387,7 @@ zm_send_binary_header(zm_t *zm, int type)
 	else {
 		/* Spec 7.3.1. A binary header begins with the sequence
 		   ZPAD, ZDLE, ZBIN. */
-		putchar(ZBIN);
+		zport_putc(ZBIN);
 		/* .. The frame type byte is ZDLE encoded. */
 		zm_put_escaped_char(zm, type);
 		crc = updcrc(type, 0);
@@ -405,7 +404,7 @@ zm_send_binary_header(zm_t *zm, int type)
 		zm_put_escaped_char(zm, crc);
 	}
 	if (type != ZDATA)
-		fflush(stdout);
+		zport_flush();
 }
 
 
@@ -418,7 +417,7 @@ zm_send_binary_header32(zm_t *zm, int type)
 	 /* Spec 7.3.2. A "32 bit CRC" binary header is similar to
 	  * a binary header, except the ZBIN character is replaced by a ZBIN32
 	  * character. */
-	putchar(ZBIN32);
+	zport_putc(ZBIN32);
 
 	/* Put the type. */
 	zm_put_escaped_char(zm, type);
@@ -489,7 +488,7 @@ zm_send_hex_header(zm_t *zm, int type)
 	{
 		s[len++]=021;
 	}
-	//fflush(stdout);
+	//zport_flush();
 	//write(1,s,len);
 	putdatas(s, len);
 }
@@ -510,16 +509,16 @@ zm_send_data(zm_t *zm, const char *buf, size_t length, int frameend)
 		zm_put_escaped_char(zm, buf[i]);
 		crc = updcrc((0xFF & buf[i]), crc);
 	}
-	putchar(ZDLE);
-	putchar(frameend);
+	zport_putc(ZDLE);
+	zport_putc(frameend);
 	crc = updcrc(frameend, crc);
 
 	crc = updcrc(0,updcrc(0,crc));
 	zm_put_escaped_char(zm, crc>>8);
 	zm_put_escaped_char(zm, crc);
 	if (frameend == ZCRCW) {
-		putchar(XON);
-		fflush(stdout);
+		zport_putc(XON);
+		zport_flush();
 	}
 }
 
@@ -536,22 +535,22 @@ zm_send_data32(zm_t *zm, const char *buf, size_t length, int frameend)
 		c = buf[i] & 0xFF;
 		crc = UPDC32(c, crc);
 	}
-	putchar(ZDLE);
-	putchar(frameend);
+	zport_putc(ZDLE);
+	zport_putc(frameend);
 	crc = UPDC32(frameend, crc);
 
 	crc = ~crc;
 	for (int i = 0; i < 4; i ++) {
 		c=(int) crc;
 		if (c & 0140)
-			putchar(zm->lastsent = c);
+			zport_putc(zm->lastsent = c);
 		else
 			zm_put_escaped_char(zm, c);
 		crc >>= 8;
 	}
 	if (frameend == ZCRCW) {
-		putchar(XON);
-		fflush(stdout);
+		zport_putc(XON);
+		zport_flush();
 	}
 }
 
@@ -1137,9 +1136,9 @@ zm_saybibi(zm_t *zm)
                          * characters, "OO" (Over and Out) and exits
                          * to the operating system or application that
                          * invoked it." */
-			putchar('O');
-			putchar('O');
-			fflush(stdout);
+			zport_putc('O');
+			zport_putc('O');
+			zport_flush();
 		case ZCAN:
 		case TIMEOUT:
 			return;
