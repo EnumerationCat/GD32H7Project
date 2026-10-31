@@ -121,6 +121,39 @@ static void shell_push_history(struct finsh_shell *shell)
     g_shell.current_history = g_shell.history_count;
 }
 
+static void shell_help(void)
+{
+    shell_putstr("available commands:\r\n");
+    shell_putstr("  help  - show this help\r\n");
+    shell_putstr("  boot  - exit shell and jump to App\r\n");
+    shell_putstr("  jump  - alias of boot\r\n");
+    shell_putstr("  exit  - alias of boot\r\n");
+}
+
+/* 退出命令 boot / jump / exit 返回 1，交回 bootloader 继续跳 App */
+static int shell_exec(const char *line)
+{
+    if (0 == strcmp(line, "help"))
+    {
+        shell_help();
+        return 0;
+    }
+
+    if (0 == strcmp(line, "boot") ||
+        0 == strcmp(line, "jump") ||
+        0 == strcmp(line, "exit"))
+    {
+        return 1;
+    }
+
+    if ('\0' != line[0])
+    {
+        shell_putstr("unknown command\r\n");
+    }
+
+    return 0;
+}
+
 void shell(void)
 {
     int ch;
@@ -276,24 +309,12 @@ void shell(void)
 			if (g_shell.echo_mode)
 				shell_putstr("\r\n");
 
-#if 0
-			/* 执行命令 */
-            if (msh_is_used() == RT_TRUE)
+            g_shell.line[g_shell.line_position] = '\0';
+            if (shell_exec(g_shell.line))
             {
-                if (g_shell.echo_mode)
-                    shell_putstr("\n");
-                msh_exec(g_shell.line, g_shell.line_position);
+                return;
             }
-            else
-            {
-                /* add ';' and run the command line */
-                g_shell.line[g_shell.line_position] = ';';
 
-                if (g_shell.line_position != 0) finsh_run_line(&g_shell.parser, g_shell.line);
-                else
-                    if (g_shell.echo_mode) shell_putstr("\n");
-            }
-#endif
             shell_putstr(FINSH_PROMPT);
             memset(g_shell.line, 0, sizeof(g_shell.line));
             g_shell.line_curpos = g_shell.line_position = 0;

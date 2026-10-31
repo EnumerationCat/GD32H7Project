@@ -1,4 +1,5 @@
 #include "bootloader.h"
+#include "shell.h"
 #include "gd32h7xx.h"
 #include "gd32h7xx_fmc.h"
 
@@ -87,6 +88,36 @@ int boot_getc(void)
         return -1;
     }
     return (int)usart_data_receive(BOOT_UART);
+}
+
+/* SysTick 轮询计时：不启用中断，跳转前 jump_to_app 会把它关掉 */
+static void boot_delay_ms(uint32_t ms)
+{
+    uint32_t reload = SystemCoreClock / 1000U;
+
+    SysTick->LOAD = reload - 1U;
+    SysTick->VAL  = 0U;
+    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+
+    for(uint32_t i = 0U; i < ms; i++) {
+        while(0U == (SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk)) {
+        }
+    }
+
+    SysTick->CTRL = 0U;
+}
+
+/* 在超时窗口内等任意按键，收到返回 1（该字节已被消费） */
+static int boot_wait_key(uint32_t timeout_ms)
+{
+    for(uint32_t elapsed = 0U; elapsed < timeout_ms; elapsed += 10U) {
+        if(boot_getc() >= 0) {
+            return 1;
+        }
+        boot_delay_ms(10U);
+    }
+
+    return 0;
 }
 
 /* 等最后一个字节真正移出，避免跳转后 App 重配串口把它掐掉 */
@@ -239,20 +270,25 @@ int main(void)
     /* SystemInit() 已由 Reset_Handler 调用：时钟就绪，VTOR = 0x08000000 */
     boot_uart_init();
 
-    boot_puts("\r\n[BOOT] bootloader running\r\n");
-
     boot_tcm_shared_ram_ensure();
 
     if(bootloader_app_is_valid(APP_BASE_ADDR, &app_base)) {
-        boot_puts("[BOOT] uImage valid  load=");
-        boot_puthex32(app_base);
-        boot_puts(" msp=");
-        boot_puthex32(*(volatile uint32_t *)app_base);
-        boot_puts(" reset_handle=");
-        boot_puthex32(*(volatile uint32_t *)(app_base + 4U));
-        boot_puts(" -> jumping\r\n");
-        boot_uart_flush();
+        /* 跳转前留 5 秒窗口：按任意键进 shell，输入 boot 退出并继续跳转 */
+        boot_puts("[BOOT] press any key for shell (5s), else 'boot' to continue\r\n");
+        if(boot_wait_key(5000U)) {
+            shell();
 
+        }
+		boot_puts("[BOOT] uImage valid  load=");
+		boot_puthex32(app_base);
+		boot_puts(" msp=");
+		boot_puthex32(*(volatile uint32_t *)app_base);
+		boot_puts(" reset_handle=");
+		boot_puthex32(*(volatile uint32_t *)(app_base + 4U));
+		boot_puts("\r\n");
+        boot_puts("[BOOT] shell exited, jumping\r\n");		
+
+        boot_uart_flush();
         bootloader_jump_to_app(app_base);
     }
 
