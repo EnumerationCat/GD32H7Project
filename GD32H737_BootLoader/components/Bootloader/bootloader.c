@@ -107,16 +107,58 @@ static void boot_delay_ms(uint32_t ms)
     SysTick->CTRL = 0U;
 }
 
-/* 在超时窗口内等任意按键，收到返回 1（该字节已被消费） */
-static int boot_wait_key(uint32_t timeout_ms)
+static void boot_putdec(uint32_t v)
 {
-    for(uint32_t elapsed = 0U; elapsed < timeout_ms; elapsed += 10U) {
-        if(boot_getc() >= 0) {
-            return 1;
-        }
-        boot_delay_ms(10U);
+    char buf[10];
+    int i = 0;
+
+    if(0U == v) {
+        boot_putc('0');
+        return;
     }
 
+    while(0U != v) {
+        buf[i++] = (char)('0' + (v % 10U));
+        v /= 10U;
+    }
+    while(i > 0) {
+        boot_putc((uint8_t)buf[--i]);
+    }
+}
+
+/* 在超时窗口内等任意按键，收到返回 1（该字节已被消费）。
+   每秒用 \r 回到行首原地刷新剩余秒数，不换行 */
+static int boot_wait_key(uint32_t timeout_ms)
+{
+    uint32_t elapsed = 0U;
+    uint32_t shown = 0U;
+
+    for(;;) {
+        uint32_t remain_ms = (timeout_ms > elapsed) ? (timeout_ms - elapsed) : 0U;
+        uint32_t remain_s = (remain_ms + 999U) / 1000U;   /* 向上取整，从 5 开始 */
+
+        /* 只有秒数变化时才重画，避免每 10ms 刷屏 */
+        if(remain_s != shown) {
+            shown = remain_s;
+            boot_puts("\r[BOOT] press any key for shell (");
+            boot_putdec(remain_s);
+            boot_puts("s), else 'boot' to continue");
+        }
+
+        if(boot_getc() >= 0) {
+            boot_puts("\r\n");
+            return 1;
+        }
+
+        if(0U == remain_ms) {
+            break;
+        }
+
+        boot_delay_ms(10U);
+        elapsed += 10U;
+    }
+
+    boot_puts("\r\n");
     return 0;
 }
 
@@ -274,7 +316,6 @@ int main(void)
 
     if(bootloader_app_is_valid(APP_BASE_ADDR, &app_base)) {
         /* 跳转前留 5 秒窗口：按任意键进 shell，输入 boot 退出并继续跳转 */
-        boot_puts("[BOOT] press any key for shell (5s), else 'boot' to continue\r\n");
         if(boot_wait_key(5000U)) {
             shell();
 
