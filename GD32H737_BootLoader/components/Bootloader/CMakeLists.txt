@@ -8,5 +8,6 @@ target_sources(bootloader PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/bootloader.c"
 	"${CMAKE_CURRENT_LIST_DIR}/Shell/shell.c"
 	"${CMAKE_CURRENT_LIST_DIR}/Shell/command.c"
+	"${CMAKE_CURRENT_LIST_DIR}/Shell/help_cmd.c"
 
 )

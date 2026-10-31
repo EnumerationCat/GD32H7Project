@@ -1,7 +1,6 @@
 #include "command.h"
+#include "help_cmd.h"
 #include "string.h"
-
-extern struct command help_cmd;
 
 static struct command * g_commands[] = {
 	&help_cmd,

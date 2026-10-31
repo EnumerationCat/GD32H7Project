@@ -20,8 +20,8 @@
 
 
 
-#include "command.h"
-#include "uart.h"
+#include "help_cmd.h"
+#include "bootloader.h"
 
 static int help_f(int argc, char **argv)
 {
@@ -35,9 +35,9 @@ static int help_f(int argc, char **argv)
 	{
 		while (cmds[i])
 		{
-			putstr(cmds[i]->name);
-			putstr("\t\t - \t");
-			putstr(cmds[i]->short_help);
+			boot_puts(cmds[i]->name);
+			boot_puts("\t\t - \t");
+			boot_puts(cmds[i]->short_help);
 			i++;
 		}
 	}
@@ -49,15 +49,15 @@ static int help_f(int argc, char **argv)
 		cmd = find_cmd(argv[1]);
 		if (cmd)
 		{
-			putstr(cmd->name);
-			putstr("\r\n");
-			putstr(cmd->long_help);
+			boot_puts(cmd->name);
+			boot_puts("\r\n");
+			boot_puts(cmd->long_help);
 		}
 		else
 		{
-			putstr("can not find command : ");
-			putstr(argv[1]);
-			putstr("\r\n");
+			boot_puts("can not find command : ");
+			boot_puts(argv[1]);
+			boot_puts("\r\n");
 		}
 	}
 	

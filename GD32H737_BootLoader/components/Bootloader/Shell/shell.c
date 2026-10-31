@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "bootloader.h"
+#include "command.h"
 #include "string.h"
 #include <stdbool.h>
 
@@ -121,36 +122,47 @@ static void shell_push_history(struct finsh_shell *shell)
     g_shell.current_history = g_shell.history_count;
 }
 
-static void shell_help(void)
-{
-    shell_putstr("available commands:\r\n");
-    shell_putstr("  help  - show this help\r\n");
-    shell_putstr("  boot  - exit shell and jump to App\r\n");
-    shell_putstr("  jump  - alias of boot\r\n");
-    shell_putstr("  exit  - alias of boot\r\n");
-}
+#define SHELL_MAX_ARGS 8
 
 /* 退出命令 boot / jump / exit 返回 1，交回 bootloader 继续跳 App */
-static int shell_exec(const char *line)
+static int shell_exec(char *line)
 {
-    if (0 == strcmp(line, "help"))
+    char *argv[SHELL_MAX_ARGS];
+    int argc = 0;
+    char *p = line;
+    struct command *cmd;
+
+    /* 按空格拆成 argv，直接改写行缓冲区 */
+    while (*p == ' ')
+        p++;
+    while ('\0' != *p && argc < SHELL_MAX_ARGS)
     {
-        shell_help();
-        return 0;
+        argv[argc++] = p;
+        while ('\0' != *p && ' ' != *p)
+            p++;
+        if ('\0' != *p)
+            *p++ = '\0';
+        while (' ' == *p)
+            p++;
     }
 
-    if (0 == strcmp(line, "boot") ||
-        0 == strcmp(line, "jump") ||
-        0 == strcmp(line, "exit"))
+    if (0 == argc)
+        return 0;
+
+    if (0 == strcmp(argv[0], "boot") ||
+        0 == strcmp(argv[0], "jump") ||
+        0 == strcmp(argv[0], "exit"))
     {
         return 1;
     }
 
-    if ('\0' != line[0])
+    cmd = find_cmd(argv[0]);
+    if (cmd)
     {
-        shell_putstr("unknown command\r\n");
+        return cmd->function(argc, argv);
     }
 
+    shell_putstr("unknown command\r\n");
     return 0;
 }
 
