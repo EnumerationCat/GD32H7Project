@@ -1,14 +1,15 @@
 #include "shell.h"
 #include "bootloader.h"
-#include "command.h"
+#include "parser.h"
 #include "string.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 
 struct finsh_shell g_shell;
 static char *finsh_prompt_custom = "msh >";
 
-static void shell_putstr(const char *str)
+void shell_putstr(const char *str)
 {
     if (NULL != str)
     {
@@ -120,50 +121,6 @@ static void shell_push_history(struct finsh_shell *shell)
         }
     }
     g_shell.current_history = g_shell.history_count;
-}
-
-#define SHELL_MAX_ARGS 8
-
-/* 退出命令 boot / jump / exit 返回 1，交回 bootloader 继续跳 App */
-static int shell_exec(char *line)
-{
-    char *argv[SHELL_MAX_ARGS];
-    int argc = 0;
-    char *p = line;
-    struct command *cmd;
-
-    /* 按空格拆成 argv，直接改写行缓冲区 */
-    while (*p == ' ')
-        p++;
-    while ('\0' != *p && argc < SHELL_MAX_ARGS)
-    {
-        argv[argc++] = p;
-        while ('\0' != *p && ' ' != *p)
-            p++;
-        if ('\0' != *p)
-            *p++ = '\0';
-        while (' ' == *p)
-            p++;
-    }
-
-    if (0 == argc)
-        return 0;
-
-    if (0 == strcmp(argv[0], "boot") ||
-        0 == strcmp(argv[0], "jump") ||
-        0 == strcmp(argv[0], "exit"))
-    {
-        return 1;
-    }
-
-    cmd = find_cmd(argv[0]);
-    if (cmd)
-    {
-        return cmd->function(argc, argv);
-    }
-
-    shell_putstr("unknown command\r\n");
-    return 0;
 }
 
 void shell(void)
@@ -322,7 +279,8 @@ void shell(void)
 				shell_putstr("\r\n");
 
             g_shell.line[g_shell.line_position] = '\0';
-            if (shell_exec(g_shell.line))
+            /* 执行命令；返回 >0 表示退出 shell（boot 等），交回 bootloader 跳 App */
+            if (msh_exec(g_shell.line, g_shell.line_position) > 0)
             {
                 return;
             }

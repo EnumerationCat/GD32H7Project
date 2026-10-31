@@ -46,6 +46,9 @@ struct finsh_shell
 /* 命令行主循环；执行 boot / jump / exit 命令后返回（不再跳 App 之外的用途） */
 void shell(void);
 
+/* shell 输出，供命令实现（如 help）使用 */
+void shell_putstr(const char *str);
+
 void finsh_set_echo(uint32_t echo);
 uint32_t finsh_get_echo(void);
 
