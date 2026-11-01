@@ -8,39 +8,39 @@ static unsigned char g_file_buf[ZMODEM_RAM_SIZE];
 
 static struct stat g_rcv_st;
 
-int fileno(FILE *stream)
+int zmodem_file_fileno(FILE *stream)
 {
 	(void)stream;
 	return 123;
 }
 
-int fstat(int fd, struct stat *statbuf)
+int zmodem_file_fstat(int fd, struct stat *statbuf)
 {
 	(void)fd;
 	*statbuf = g_rcv_st;
 	return 0;
 }
 
-FILE *popen(const char *command, const char *type)
+FILE *zmodem_file_popen(const char *command, const char *type)
 {
 	(void)command;
 	(void)type;
 	return (FILE *)1;
 }
 
-int pclose(FILE *stream)
+int zmodem_file_pclose(FILE *stream)
 {
 	(void)stream;
 	return 0;
 }
 
-unsigned int sleep(unsigned int seconds)
+unsigned int zmodem_sleep(unsigned int seconds)
 {
 	(void)seconds;
 	return 0;
 }
 
-FILE *fopen2(const char *pathname, const char *mode)
+FILE *zmodem_file_open(const char *pathname, const char *mode)
 {
 	(void)pathname;
 	(void)mode;
@@ -52,7 +52,7 @@ FILE *fopen2(const char *pathname, const char *mode)
 }
 
 /* 与 fwrite 语义一致：成功返回 nmemb，超出缓冲区返回 0 */
-size_t fwrite2(const void *ptr, size_t size, size_t nmemb,
+size_t zmodem_file_write(const void *ptr, size_t size, size_t nmemb,
 			  FILE *stream)
 {
 	size_t bytes = size * nmemb;
@@ -71,7 +71,7 @@ size_t fwrite2(const void *ptr, size_t size, size_t nmemb,
 	return nmemb;
 }
 
-int putc2(int c, FILE *stream)
+int zmodem_file_putc(int c, FILE *stream)
 {
 	(void)stream;
 

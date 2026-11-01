@@ -339,7 +339,7 @@ fubar:
 	zreadline_canit(rz->zm->zr, STDOUT_FILENO);
 #if 0	
 	if (rz->topipe && rz->fout) {
-		pclose(rz->fout);  return ERROR;
+		zmodem_file_pclose(rz->fout);  return ERROR;
 	}
 	if (rz->fout)
 		fclose(rz->fout);
@@ -630,7 +630,7 @@ rz_process_header(rz_t *rz, char *name, struct zm_fileinfo *zi)
 		int i;
 		if (rz->zmanag == ZF1_ZMNEW || rz->zmanag==ZF1_ZMNEWL) {
 #if 0			
-			if (-1==fstat(fileno(rz->fout),&sta)) {
+			if (-1==zmodem_file_fstat(zmodem_file_fileno(rz->fout),&sta)) {
 				log_info(_("file exists, skipped: %s"),name);
 				return ERROR;
 			}
@@ -738,7 +738,7 @@ rz_process_header(rz_t *rz, char *name, struct zm_fileinfo *zi)
 			 _("Topipe"),
 			 rz->pathname, rz->thisbinary?"BIN":"ASCII");
 #endif		
-		if ((rz->fout=popen(name_static, "w")) == NULL)
+		if ((rz->fout=zmodem_file_popen(name_static, "w")) == NULL)
 			return ERROR;
 	} else {
 #if 0	
@@ -767,8 +767,8 @@ rz_process_header(rz_t *rz, char *name, struct zm_fileinfo *zi)
 #endif		
 		if (rz->thisbinary && rz->zconv==ZCRESUM) {
 			struct stat st;
-			rz->fout = fopen2(name_static, "r+");
-			if (rz->fout && 0==fstat(fileno(rz->fout),&st))
+			rz->fout = zmodem_file_open(name_static, "r+");
+			if (rz->fout && 0==zmodem_file_fstat(zmodem_file_fileno(rz->fout),&st))
 			{
 				int can_resume=TRUE;
 				if (rz->zmanag==ZF1_ZMCRC) {
@@ -800,7 +800,7 @@ rz_process_header(rz_t *rz, char *name, struct zm_fileinfo *zi)
 			if (rz->fout)
 				fclose(rz->fout);
 		}
-		rz->fout = fopen2(name_static, openmode);
+		rz->fout = zmodem_file_open(name_static, openmode);
 		if ( !rz->fout)
 		{
 			log_error(_("cannot open %s: %s"), name_static, strerror(errno));
@@ -812,10 +812,10 @@ buffer_it:
 	if (rz->topipe == 0) {
 		if (rz->o_sync) {
 			int oldflags;
-			oldflags = fcntl (fileno(rz->fout), F_GETFD, 0);
+			oldflags = fcntl (zmodem_file_fileno(rz->fout), F_GETFD, 0);
 			if (oldflags>=0 && !(oldflags & O_SYNC)) {
 				oldflags|=O_SYNC;
-				fcntl (fileno(rz->fout), F_SETFD, oldflags); /* errors don't matter */
+				fcntl (zmodem_file_fileno(rz->fout), F_SETFD, oldflags); /* errors don't matter */
 			}
 		}
 	}
@@ -839,7 +839,7 @@ rz_write_string_to_file(rz_t *rz, struct zm_fileinfo *zi, char *buf, size_t n)
 	if (n == 0)
 		return OK;
 	if (rz->thisbinary) {
-		if (fwrite2(buf,n,1,rz->fout)!=1)
+		if (zmodem_file_write(buf,n,1,rz->fout)!=1)
 			return ERROR;
 	}
 	else {
@@ -852,7 +852,7 @@ rz_write_string_to_file(rz_t *rz, struct zm_fileinfo *zi, char *buf, size_t n)
 				zi->eof_seen=TRUE;
 				return OK;
 			}
-			putc2(*p ,rz->fout);
+			zmodem_file_putc(*p ,rz->fout);
 		}
 	}
 	return OK;
@@ -1417,7 +1417,7 @@ write_modem_escaped_string_to_stdout(const char *s)
 			s=p;
 		}
 		if (*p=='\336')
-			sleep(1);
+			zmodem_sleep(1);
 		else
 			sendbrk(0);
 		p++;
@@ -1433,7 +1433,7 @@ rz_closeit(rz_t *rz, struct zm_fileinfo *zi)
 #if 0
 	int ret;
 	if (rz->topipe) {
-		if (pclose(rz->fout)) {
+		if (zmodem_file_pclose(rz->fout)) {
 			return ERROR;
 		}
 		return OK;

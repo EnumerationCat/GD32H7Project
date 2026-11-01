@@ -137,18 +137,21 @@ struct stat {
 	unsigned char *datas;
 };
 
-int fstat(int fd, struct stat *statbuf);
-unsigned int sleep(unsigned int seconds);
+int zmodem_file_fileno(FILE *stream);
+int zmodem_file_fstat(int fd, struct stat *statbuf);
+FILE *zmodem_file_popen(const char *command, const char *type);
+int zmodem_file_pclose(FILE *stream);
+unsigned int zmodem_sleep(unsigned int seconds);
 
 /* 收到 RAM 的缓冲区：AXI SRAM 512K，栈/堆在低地址，这里放 384KB 够装当前 App 镜像 */
 #define ZMODEM_RAM_SIZE   (384U * 1024U)
 
-FILE *fopen2(const char *pathname, const char *mode);
+FILE *zmodem_file_open(const char *pathname, const char *mode);
 
-size_t fwrite2(const void *ptr, size_t size, size_t nmemb,
+size_t zmodem_file_write(const void *ptr, size_t size, size_t nmemb,
 			  FILE *stream);
 
-int putc2(int c, FILE *stream);
+int zmodem_file_putc(int c, FILE *stream);
 
 /* 供命令层展示接收结果 */
 unsigned char *zmodem_file_buffer(void);

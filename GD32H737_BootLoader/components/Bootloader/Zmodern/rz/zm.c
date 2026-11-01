@@ -1160,7 +1160,7 @@ zm_do_crc_check(zm_t *zm, FILE *f, size_t remote_bytes, size_t check_bytes)
 	size_t n;
 	int c;
 	int t1=0,t2=0;
-	if (-1==fstat(fileno(f),&st)) {
+	if (-1==zmodem_file_fstat(zmodem_file_fileno(f),&st)) {
 		return ERROR;
 	}
 	if (check_bytes==0 && ((size_t) st.st_size)!=remote_bytes)
