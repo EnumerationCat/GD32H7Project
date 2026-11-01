@@ -280,6 +280,10 @@ size_t zmodem_receive(const char *directory,
 		log_info(_("Transfer complete"));
 	//exit(exitcode);
 
+	/* 发送端收尾时会送 "OO"（部分实现还带 CR/LF），ackbibi 只吞掉
+	前两个字节。这里把残留字节丢弃，否则回到 shell 会被当成命令执行。 */
+	while (zport_getc(100) >= 0) {
+	}
 	return zmodem_file_size();
 }
 

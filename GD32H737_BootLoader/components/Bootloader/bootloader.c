@@ -142,6 +142,8 @@ int boot_getc_timeout(uint32_t timeout_ms)
     return -1;
 }
 
+
+
 /* SysTick 轮询计时：不启用中断，跳转前 jump_to_app 会把它关掉 */
 static void boot_delay_ms(uint32_t ms)
 {
@@ -365,6 +367,8 @@ int main(void)
     boot_uart_init();
 
     boot_tcm_shared_ram_ensure();
+
+	
 
     if(bootloader_app_is_valid(APP_BASE_ADDR, &app_base)) {
         /* 跳转前留 5 秒窗口：按任意键进 shell，输入 boot 退出并继续跳转 */
