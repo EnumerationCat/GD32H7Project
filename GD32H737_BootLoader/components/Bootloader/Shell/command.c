@@ -1,7 +1,7 @@
 #include "command.h"
 #include "help_cmd.h"
 #include "boot_cmd.h"
-#include "mrz.h"
+#include "zmodem_cmd.h"
 #include "string.h"
 
 static struct command * g_commands[] = {

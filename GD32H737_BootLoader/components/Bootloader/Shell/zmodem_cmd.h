@@ -1,5 +1,5 @@
-#ifndef __MRZ_H__
-#define __MRZ_H__
+#ifndef __ZMODEM_CMD_H__
+#define __ZMODEM_CMD_H__
 
 #include "command.h"
 
