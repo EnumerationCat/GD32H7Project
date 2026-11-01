@@ -48,6 +48,8 @@ void shell(void);
 
 /* shell 输出，供命令实现（如 help）使用 */
 void shell_putstr(const char *str);
+void shell_putdec(uint32_t v);
+void shell_puthex32(uint32_t v);
 
 void finsh_set_echo(uint32_t echo);
 uint32_t finsh_get_echo(void);

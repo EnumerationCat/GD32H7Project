@@ -5,7 +5,7 @@
 #include "zmodem.h"
 #include "command.h"
 #include "file.h"
-#include "bootloader.h"
+#include "shell.h"
 
 static int rz(int argc, char **argv)
 {
@@ -14,12 +14,12 @@ static int rz(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	boot_puts("\r\n[rz] waiting for ZMODEM sender (send: sz -b file)...\r\n");
-	boot_puts("[rz] RAM buffer: ");
-	boot_puthex32((uint32_t)(uintptr_t)zmodem_file_buffer());
-	boot_puts(" capacity: ");
-	boot_putdec((uint32_t)zmodem_file_capacity());
-	boot_puts(" bytes\r\n");
+	shell_putstr("\r\n[rz] waiting for ZMODEM sender (send: sz -b file)...\r\n");
+	shell_putstr("[rz] RAM buffer: ");
+	shell_puthex32((uint32_t)(uintptr_t)zmodem_file_buffer());
+	shell_putstr(" capacity: ");
+	shell_putdec((uint32_t)zmodem_file_capacity());
+	shell_putstr(" bytes\r\n");
 
 	received = zmodem_receive(NULL, /* 文件名由发送端决定，这里只关心内容 */
 				  NULL, /* 不限制文件 */
@@ -28,11 +28,11 @@ static int rz(int argc, char **argv)
 				  0,    /* 不限速 */
 				  RZSZ_FLAGS_NONE);
 
-	boot_puts("[rz] received ");
-	boot_putdec((uint32_t)received);
-	boot_puts(" bytes at ");
-	boot_puthex32((uint32_t)(uintptr_t)zmodem_file_buffer());
-	boot_puts("\r\n");
+	shell_putstr("[rz] received ");
+	shell_putdec((uint32_t)received);
+	shell_putstr(" bytes at ");
+	shell_puthex32((uint32_t)(uintptr_t)zmodem_file_buffer());
+	shell_putstr("\r\n");
 
 	return 0;
 }

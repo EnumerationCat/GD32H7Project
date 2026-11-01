@@ -22,6 +22,16 @@ static void shell_putchar(char ch)
     boot_putc((uint8_t)ch);
 }
 
+void shell_putdec(uint32_t v)
+{
+    boot_putdec(v);
+}
+
+void shell_puthex32(uint32_t v)
+{
+    boot_puthex32(v);
+}
+
 const char *finsh_get_prompt(void)
 {
     return finsh_prompt_custom;
