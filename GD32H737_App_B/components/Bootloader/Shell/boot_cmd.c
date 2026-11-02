@@ -2,6 +2,7 @@
 
 #include "boot_cmd.h"
 #include "bootloader.h"
+#include "boot_flash.h"
 #include "shell.h"
 #include "string.h"
 
@@ -124,14 +125,29 @@ static int boot_request_addr(uint32_t addr)
 	return 1;
 }
 
+/* 无参数：优先配置扇区标记的活动槽（最近写入/更新的 App），无效则回退另一槽 */
+static int boot_request_active(void)
+{
+	if(1 == boot_cfg_get_active_slot()) {
+		if(boot_request_slot(1)) {
+			return 1;
+		}
+		return boot_request_slot(0);
+	}
+
+	if(boot_request_slot(0)) {
+		return 1;
+	}
+	return boot_request_slot(1);
+}
+
 /* 返回 1 告诉 shell() 退出主循环，由 bootloader 跳转；失败留在 shell */
 static int boot_f(int argc, char **argv)
 {
 	uint32_t addr;
 
 	if(1 == argc) {
-		/* 本次会话默认跳 A 槽；下次上电由配置扇区决定 */
-		return boot_request_slot(0);
+		return boot_request_active();
 	}
 
 	if(2 == argc) {
@@ -153,10 +169,10 @@ static int boot_f(int argc, char **argv)
 struct command boot_cmd = {
 	"boot",
 
-	"exit shell and jump to App slot A\r\n",
+	"exit shell and jump to the active (newest) App slot\r\n",
 
 	"Usage: \r\n"
-	"       boot,        jump to slot A\r\n"
+	"       boot,        jump to the active slot set by the last rz\r\n"
 	"       boot a,      jump to slot A\r\n"
 	"       boot b,      jump to slot B\r\n"
 	"       boot 0xADDR, jump to uImage/vector table at address\r\n",

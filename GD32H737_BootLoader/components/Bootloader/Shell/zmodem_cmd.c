@@ -9,11 +9,38 @@
 #include "bootloader.h"
 #include "boot_flash.h"
 
+static int rz_slot_valid(int slot)
+{
+	uint32_t base = slot ? APP_SLOT_B_ADDR : APP_SLOT_A_ADDR;
+	uint32_t end  = slot ? APP_SLOT_B_END  : APP_SLOT_A_END;
+	uint32_t size = slot ? APP_SLOT_B_SIZE : APP_SLOT_A_SIZE;
+
+	return bootloader_image_parse(base, size, base, end, 1, NULL);
+}
+
+/* 当前启动槽有效就写另一槽（A/B 轮换）；当前槽无效则写回该槽修复。
+   返回 0 = A 槽，1 = B 槽。 */
+static int rz_pick_target_slot(void)
+{
+	int active = boot_cfg_get_active_slot();
+	int other  = active ? 0 : 1;
+
+	if(rz_slot_valid(active)) {
+		return other;
+	}
+	if(rz_slot_valid(other)) {
+		return active;
+	}
+	return other;
+}
+
 static int rz(int argc, char **argv)
 {
 	size_t received;
 	unsigned char *buf;
 	boot_image_info_t info;
+	int target;
+	uint32_t target_base, target_end, target_size;
 
 	(void)argc;
 	(void)argv;
@@ -38,19 +65,30 @@ static int rz(int argc, char **argv)
 
 	buf = zmodem_file_buffer();
 
+	target      = rz_pick_target_slot();
+	target_base = target ? APP_SLOT_B_ADDR : APP_SLOT_A_ADDR;
+	target_end  = target ? APP_SLOT_B_END  : APP_SLOT_A_END;
+	target_size = target ? APP_SLOT_B_SIZE : APP_SLOT_A_SIZE;
+
+	shell_putstr("[rz] target slot ");
+	shell_putstr(target ? "B" : "A");
+	shell_putstr(" image=");
+	shell_puthex32(target_base);
+	shell_putstr("\r\n");
+
 	if(0U == received) {
 		shell_putstr("[rz] no data, abort\r\n");
 		return 0;
 	}
-	if(received > APP_SLOT_B_SIZE) {
-		shell_putstr("[rz] image larger than slot B, abort\r\n");
+	if(received > target_size) {
+		shell_putstr("[rz] image larger than target slot, abort\r\n");
 		return 0;
 	}
 
-	/* 校验 uImage 头与数据 CRC，并要求 ih_load 落在 B 槽内 */
+	/* 校验 uImage 头与数据 CRC，并要求 ih_load 落在目标槽内 */
 	if(!bootloader_image_parse((uint32_t)(uintptr_t)buf, (uint32_t)received,
-				   APP_SLOT_B_ADDR, APP_SLOT_B_END, 1, &info)) {
-		shell_putstr("[rz] invalid uImage (magic/CRC/load must be in slot B)\r\n");
+				   target_base, target_end, 1, &info)) {
+		shell_putstr("[rz] invalid uImage (magic/CRC/load must be in target slot)\r\n");
 		return 0;
 	}
 
@@ -65,20 +103,24 @@ static int rz(int argc, char **argv)
 	shell_puthex32(info.ep);
 	shell_putstr(" size=");
 	shell_putdec(info.size);
-	shell_putstr("\r\n[rz] writing slot B ...\r\n");
+	shell_putstr("\r\n[rz] writing slot ");
+	shell_putstr(target ? "B" : "A");
+	shell_putstr(" ...\r\n");
 
-	if(!boot_flash_write_image(APP_SLOT_B_ADDR, buf, (uint32_t)received)) {
+	if(!boot_flash_write_image(target_base, buf, (uint32_t)received)) {
 		shell_putstr("[rz] flash erase/write/verify FAILED\r\n");
 		return 0;
 	}
 	shell_putstr("[rz] flash verify OK\r\n");
 
-	if(!boot_cfg_set_active_slot(1)) {
+	if(!boot_cfg_set_active_slot(target)) {
 		shell_putstr("[rz] boot config write FAILED\r\n");
 		return 0;
 	}
 
-	shell_putstr("[rz] OK, next boot slot = B, load=");
+	shell_putstr("[rz] OK, next boot slot = ");
+	shell_putstr(target ? "B" : "A");
+	shell_putstr(", load=");
 	shell_puthex32(info.load);
 	shell_putstr("\r\n");
 
@@ -88,11 +130,11 @@ static int rz(int argc, char **argv)
 struct command rz_cmd = {
 	"rz",
 
-	"receive uImage via ZMODEM and write to app slot B\r\n",
+	"receive uImage via ZMODEM and write to the inactive app slot\r\n",
 
 	"Usage: \r\n"
-	"       rz, receive a uImage (with 64-byte boot header) into slot B\r\n"
-	"           and mark slot B for next boot\r\n",
+	"       rz, receive a uImage (with 64-byte boot header) into the\r\n"
+	"           inactive slot and mark it for next boot\r\n",
 
 	rz,
 };
