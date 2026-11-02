@@ -1,0 +1,502 @@
+#include <stddef.h>
+
+#include "bootloader.h"
+#include "boot_flash.h"
+#include "shell.h"
+#include "ring_buffer.h"
+#include "gd32h7xx.h"
+#include "gd32h7xx_fmc.h"
+
+
+
+
+
+
+/* 调试串口：与 App 保持一致（USART0 / PA9 TX / 115200-8-N-1），方便同一终端观察 */
+#define BOOT_UART           USART0
+#define BOOT_UART_CLK       RCU_USART0
+#define BOOT_UART_TX_PORT   GPIOA
+#define BOOT_UART_TX_PIN    GPIO_PIN_9
+#define BOOT_UART_TX_AF     GPIO_AF_7
+#define BOOT_UART_TX_CLK    RCU_GPIOA
+#define BOOT_UART_RX_PORT   GPIOA
+#define BOOT_UART_RX_PIN    GPIO_PIN_10
+#define BOOT_UART_RX_AF     GPIO_AF_7
+#define BOOT_UART_RX_CLK    RCU_GPIOA
+#define BOOT_UART_BAUD      115200U
+
+/* RX 中断只写、主循环只读：单生产者/单消费者，无需额外加锁 */
+static ring_buffer g_uart_rx;
+
+static void boot_uart_init(void)
+{
+    rcu_periph_clock_enable(BOOT_UART_TX_CLK);
+    rcu_periph_clock_enable(BOOT_UART_RX_CLK);
+    rcu_periph_clock_enable(BOOT_UART_CLK);
+
+    gpio_af_set(BOOT_UART_TX_PORT, BOOT_UART_TX_AF, BOOT_UART_TX_PIN);
+    gpio_mode_set(BOOT_UART_TX_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, BOOT_UART_TX_PIN);
+    gpio_output_options_set(BOOT_UART_TX_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_100_220MHZ, BOOT_UART_TX_PIN);
+
+    gpio_af_set(BOOT_UART_RX_PORT, BOOT_UART_RX_AF, BOOT_UART_RX_PIN);
+    gpio_mode_set(BOOT_UART_RX_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, BOOT_UART_RX_PIN);
+
+    usart_deinit(BOOT_UART);
+    usart_baudrate_set(BOOT_UART, BOOT_UART_BAUD);
+    usart_stop_bit_set(BOOT_UART, USART_STB_1BIT);
+    usart_word_length_set(BOOT_UART, USART_WL_8BIT);
+    usart_parity_config(BOOT_UART, USART_PM_NONE);
+    usart_transmit_config(BOOT_UART, USART_TRANSMIT_ENABLE);
+    usart_receive_config(BOOT_UART, USART_RECEIVE_ENABLE);
+
+    /* 接收走中断 + ring buffer，避免轮询丢字节（ZMODEM 连续数据必需） */
+    ring_buffer_init(&g_uart_rx);
+    usart_interrupt_enable(BOOT_UART, USART_INT_RBNE);
+    nvic_irq_enable(USART0_IRQn, 1U, 0U);
+
+    usart_enable(BOOT_UART);
+}
+
+/* USART0 RX：读走数据即清 RBNE；ORE 表示硬件丢字节，一并清掉防止卡死 */
+void USART0_IRQHandler(void)
+{
+    if(RESET != usart_interrupt_flag_get(BOOT_UART, USART_INT_FLAG_RBNE)) {
+        unsigned char c = (unsigned char)usart_data_receive(BOOT_UART);
+        ring_buffer_write(c, &g_uart_rx);
+    }
+    if(RESET != usart_flag_get(BOOT_UART, USART_FLAG_ORERR)) {
+        usart_flag_clear(BOOT_UART, USART_FLAG_ORERR);
+    }
+}
+
+void boot_putc(uint8_t c)
+{
+    while(RESET == usart_flag_get(BOOT_UART, USART_FLAG_TC)) {
+    }
+    usart_data_transmit(BOOT_UART, c);
+}
+
+void boot_puts(const char *s)
+{
+    while('\0' != *s) {
+        boot_putc((uint8_t)*s++);
+    }
+}
+
+/* 非阻塞读：已收到字节返回 0~255，无数据返回 -1 */
+int boot_getc(void)
+{
+    unsigned char c;
+
+    if(0 != ring_buffer_read(&c, &g_uart_rx)) {
+        return -1;
+    }
+    return (int)c;
+}
+
+/* 带超时读：超时返回 -1；timeout_ms 为 0 时等价于 boot_getc() */
+int boot_getc_timeout(uint32_t timeout_ms)
+{
+    int c = boot_getc();
+
+    if((c >= 0) || (0U == timeout_ms)) {
+        return c;
+    }
+
+    /* 一次性 1ms SysTick 计时，用完即关，避免影响 jump_to_app */
+    SysTick->LOAD = (SystemCoreClock / 1000U) - 1U;
+    SysTick->VAL  = 0U;
+    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+
+    for(uint32_t elapsed = 0U; elapsed < timeout_ms; elapsed++) {
+        while(0U == (SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk)) {
+        }
+        c = boot_getc();
+        if(c >= 0) {
+            SysTick->CTRL = 0U;
+            return c;
+        }
+    }
+
+    SysTick->CTRL = 0U;
+    return -1;
+}
+
+
+
+/* SysTick 轮询计时：不启用中断，跳转前 jump_to_app 会把它关掉 */
+static void boot_delay_ms(uint32_t ms)
+{
+    uint32_t reload = SystemCoreClock / 1000U;
+
+    SysTick->LOAD = reload - 1U;
+    SysTick->VAL  = 0U;
+    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+
+    for(uint32_t i = 0U; i < ms; i++) {
+        while(0U == (SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk)) {
+        }
+    }
+
+    SysTick->CTRL = 0U;
+}
+
+void boot_putdec(uint32_t v)
+{
+    char buf[10];
+    int i = 0;
+
+    if(0U == v) {
+        boot_putc('0');
+        return;
+    }
+
+    while(0U != v) {
+        buf[i++] = (char)('0' + (v % 10U));
+        v /= 10U;
+    }
+    while(i > 0) {
+        boot_putc((uint8_t)buf[--i]);
+    }
+}
+
+/* 在超时窗口内等任意按键，收到返回 1（该字节已被消费）。
+   每秒用 \r 回到行首原地刷新剩余秒数，不换行 */
+static int boot_wait_key(uint32_t timeout_ms)
+{
+    uint32_t elapsed = 0U;
+    uint32_t shown = 0U;
+
+    for(;;) {
+        uint32_t remain_ms = (timeout_ms > elapsed) ? (timeout_ms - elapsed) : 0U;
+        uint32_t remain_s = (remain_ms + 999U) / 1000U;   /* 向上取整，从 5 开始 */
+
+        /* 只有秒数变化时才重画，避免每 10ms 刷屏 */
+        if(remain_s != shown) {
+            shown = remain_s;
+            boot_puts("\r[BOOT] press any key for shell (");
+            boot_putdec(remain_s);
+            boot_puts("s), else 'boot' to continue");
+        }
+
+        if(boot_getc() >= 0) {
+            boot_puts("\r\n");
+            return 1;
+        }
+
+        if(0U == remain_ms) {
+            break;
+        }
+
+        boot_delay_ms(10U);
+        elapsed += 10U;
+    }
+
+    boot_puts("\r\n");
+    return 0;
+}
+
+/* 等最后一个字节真正移出，避免跳转后 App 重配串口把它掐掉 */
+static void boot_uart_flush(void)
+{
+    while(RESET == usart_flag_get(BOOT_UART, USART_FLAG_TC)) {
+    }
+}
+
+void boot_puthex32(uint32_t v)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    boot_puts("0x");
+    for(int i = 28; i >= 0; i -= 4) {
+        boot_putc((uint8_t)hex[(v >> i) & 0xFU]);
+    }
+}
+
+/* uImage 头按大端存储，读入后需要转换 */
+static uint32_t ih_be32(__be32 v)
+{
+    return __builtin_bswap32((uint32_t)v);
+}
+
+/* 标准 CRC-32（反射多项式 0xEDB88320，init/xorout 均为 0xFFFFFFFF），
+   与 u-boot crc32(0, buf, len) 一致 */
+static uint32_t boot_crc32(const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = 0xFFFFFFFFU;
+
+    while(len-- > 0U) {
+        crc ^= *data++;
+        for(uint32_t i = 0U; i < 8U; i++) {
+            crc = (crc >> 1) ^ (0xEDB88320U & (uint32_t)-(int32_t)(crc & 1U));
+        }
+    }
+    return ~crc;
+}
+
+int bootloader_image_parse(uint32_t image_base, uint32_t src_len,
+                           uint32_t slot_base, uint32_t slot_end,
+                           int verify_crc, boot_image_info_t *info)
+{
+    const image_header_t *hdr = (const image_header_t *)image_base;
+    uint32_t load, ep, size, src_load, sp, pc;
+
+    if((src_len < (IMAGE_HEADER_SIZE + 8U)) || (slot_end <= (slot_base + IMAGE_HEADER_SIZE))) {
+        return 0;
+    }
+    if(IMAGE_MAGIC != ih_be32(hdr->ih_magic)) {
+        return 0;
+    }
+
+    load = ih_be32(hdr->ih_load);
+    ep   = ih_be32(hdr->ih_ep);
+    size = ih_be32(hdr->ih_size);
+
+    /* 数据须完整落在源缓冲区和目标槽内，且不覆盖 uImage 头 */
+    if(size > (src_len - IMAGE_HEADER_SIZE)) {
+        return 0;
+    }
+    if(size > (slot_end - slot_base - IMAGE_HEADER_SIZE)) {
+        return 0;
+    }
+    if((load < (slot_base + IMAGE_HEADER_SIZE)) || (load >= slot_end)) {
+        return 0;
+    }
+
+    /* ARMv7-M：向量表必须按"异常个数向上取整到 2 的幂"对齐。
+       App 的表 0x3A4 字节 -> 1024 字节（不是 128！只做 128 对齐时，
+       外部中断取向量会落到错误的表项，186 号 IRQ 会取到 0 -> HardFault） */
+    if(0U != (load & 0x3FFU)) {
+        return 0;
+    }
+
+    /* 入口点须在槽内，且末位为 1（Thumb 位） */
+    if((ep < load) || (ep >= slot_end)) {
+        return 0;
+    }
+    if(0U == (ep & 1U)) {
+        return 0;
+    }
+
+    /* 向量表从源镜像取，而不是目标槽（rz 时目标槽还是旧内容） */
+    if((load - slot_base) > (src_len - IMAGE_HEADER_SIZE - 8U)) {
+        return 0;
+    }
+    src_load = image_base + (load - slot_base);
+    sp = *(volatile uint32_t *)src_load;
+    pc = *(volatile uint32_t *)(src_load + 4U);
+
+    /* 栈顶必须落在 App 使用的 RAM 区间内 */
+    if((sp < APP_SRAM_START) || (sp > APP_SRAM_END)) {
+        return 0;
+    }
+
+    /* 复位向量必须落在槽内，且末位为 1（Thumb 位） */
+    if((pc < load) || (pc >= slot_end)) {
+        return 0;
+    }
+    if(0U == (pc & 1U)) {
+        return 0;
+    }
+
+    if(verify_crc) {
+        image_header_t hdr_copy = *hdr;
+
+        /* ih_hcrc 在计算时按 0 处理 */
+        hdr_copy.ih_hcrc = 0;
+        if(boot_crc32((const uint8_t *)&hdr_copy, IMAGE_HEADER_SIZE) != ih_be32(hdr->ih_hcrc)) {
+            return 0;
+        }
+        if(boot_crc32((const uint8_t *)image_base + IMAGE_HEADER_SIZE, size) != ih_be32(hdr->ih_dcrc)) {
+            return 0;
+        }
+    }
+
+    if(NULL != info) {
+        info->image_base = image_base;
+        info->load       = load;
+        info->ep         = ep;
+        info->size       = size;
+        info->dcrc       = ih_be32(hdr->ih_dcrc);
+    }
+    return 1;
+}
+
+static uint32_t g_boot_target;
+
+void boot_set_target(uint32_t load_addr)
+{
+    g_boot_target = load_addr;
+}
+
+uint32_t boot_get_target(void)
+{
+    return g_boot_target;
+}
+
+void bootloader_jump_to_app(uint32_t app_base)
+{
+    /* 先取出 App 的栈顶与复位向量，之后不再使用本函数的栈 */
+    uint32_t sp = *(volatile uint32_t *)app_base;
+    uint32_t pc = *(volatile uint32_t *)(app_base + 4U);
+
+    /* 关中断，清 SysTick，避免残留中断进 App */
+    __disable_irq();
+    SysTick->CTRL = 0U;
+    SysTick->LOAD = 0U;
+    SysTick->VAL  = 0U;
+
+    /* 关闭并清除所有 NVIC 中断 */
+    for(uint32_t i = 0U; i < 8U; i++) {
+        NVIC->ICER[i] = 0xFFFFFFFFU;
+        NVIC->ICPR[i] = 0xFFFFFFFFU;
+    }
+
+    /* 把向量表重定向到 App */
+    SCB->VTOR = app_base;
+    __DSB();
+    __ISB();
+
+    /* 设置 App 栈顶后跳转（bx 保证不再访存本栈）。
+       最后恢复 PRIMASK：App 按复位后的默认状态运行，FreeRTOS 依赖中断启动调度器 */
+    __set_MSP(sp);
+    __enable_irq();
+    __ASM volatile("bx %0" : : "r"(pc));
+
+    for(;;) {
+    }
+}
+
+/* 共享 RAM 的 ITCM/DTCM 划分由选项字节决定（出厂默认 ITCM 64K + DTCM 128K）。
+   链接脚本按 256K/256K 布局，故首次运行需改写选项字节并复位一次使其生效。 */
+static void boot_tcm_shared_ram_ensure(void)
+{
+    uint32_t itcm_kb = 0U;
+    uint32_t dtcm_kb = 0U;
+    fmc_state_enum st;
+
+    ob_tcm_shared_ram_size_get(&itcm_kb, &dtcm_kb);
+    if((256U == itcm_kb) && (256U == dtcm_kb)) {
+        return;
+    }
+
+    boot_puts("[BOOT] TCM shared RAM not 256K/256K, reconfiguring and resetting...\r\n");
+    boot_uart_flush();
+
+    ob_unlock();
+    ob_tcm_shared_ram_config(OB_ITCM_SHARED_RAM_256KB, OB_DTCM_SHARED_RAM_256KB);
+    st = ob_start();
+    ob_lock();
+
+    /* 只写失败时继续运行，避免反复写 flash 造成复位死循环 */
+    if(FMC_READY != st) {
+        boot_puts("[BOOT] TCM option byte write FAILED, keep default\r\n");
+        return;
+    }
+
+    NVIC_SystemReset();     /* 选项字节复位后生效，不返回 */
+    for(;;) {
+    }
+}
+
+static void boot_dump_slot(char slot, int valid, const boot_image_info_t *info)
+{
+    boot_puts("[BOOT] slot ");
+    boot_putc((uint8_t)slot);
+    boot_puts(": image=");
+    boot_puthex32((slot == 'A') ? APP_SLOT_A_ADDR : APP_SLOT_B_ADDR);
+
+    if(!valid) {
+        boot_puts(" invalid\r\n");
+        return;
+    }
+
+    boot_puts(" load=");
+    boot_puthex32(info->load);
+    boot_puts(" ep=");
+    boot_puthex32(info->ep);
+    boot_puts(" size=");
+    boot_putdec(info->size);
+    boot_puts(" valid\r\n");
+}
+
+int main(void)
+{
+    boot_image_info_t img_a;
+    boot_image_info_t img_b;
+    int a_ok, b_ok, active;
+    uint32_t default_load = 0U;
+
+    /* SystemInit() 已由 Reset_Handler 调用：时钟就绪，VTOR = 0x08000000 */
+    boot_uart_init();
+
+    boot_tcm_shared_ram_ensure();
+
+    a_ok = bootloader_image_parse(APP_SLOT_A_ADDR, APP_SLOT_A_SIZE,
+                                  APP_SLOT_A_ADDR, APP_SLOT_A_END, 1, &img_a);
+    b_ok = bootloader_image_parse(APP_SLOT_B_ADDR, APP_SLOT_B_SIZE,
+                                  APP_SLOT_B_ADDR, APP_SLOT_B_END, 1, &img_b);
+
+    boot_dump_slot('A', a_ok, &img_a);
+    boot_dump_slot('B', b_ok, &img_b);
+
+    /* 配置指定的槽无效时回退到另一个有效槽 */
+    active = boot_cfg_get_active_slot();
+    if((1 == active) && b_ok) {
+        default_load = img_b.load;
+    } else if(a_ok) {
+        default_load = img_a.load;
+    } else if(b_ok) {
+        default_load = img_b.load;
+    }
+
+    boot_puts("[BOOT] next boot slot: ");
+    if(0U == default_load) {
+        boot_puts("none\r\n");
+    } else if(a_ok && (default_load == img_a.load)) {
+        boot_puts("A\r\n");
+    } else {
+        boot_puts("B\r\n");
+    }
+
+    for(;;) {
+        int enter_shell = 0;
+
+        if(0U != default_load) {
+            /* 跳转前留 5 秒窗口：按任意键进 shell */
+            if(boot_wait_key(5000U)) {
+                enter_shell = 1;
+            }
+        } else {
+            boot_puts("[BOOT] no valid image, entering shell\r\n");
+            enter_shell = 1;
+        }
+
+        if(enter_shell) {
+            uint32_t target;
+
+            shell();
+
+            /* boot 命令校验通过后才返回；目标地址由 boot_cmd 设置 */
+            target = boot_get_target();
+            if(0U != target) {
+                boot_puts("[BOOT] boot command -> load=");
+                boot_puthex32(target);
+                boot_puts("\r\n");
+                boot_uart_flush();
+                bootloader_jump_to_app(target);
+            }
+            continue;
+        }
+
+        boot_puts("[BOOT] uImage valid load=");
+        boot_puthex32(default_load);
+        boot_puts(" msp=");
+        boot_puthex32(*(volatile uint32_t *)default_load);
+        boot_puts(" reset_handle=");
+        boot_puthex32(*(volatile uint32_t *)(default_load + 4U));
+        boot_puts("\r\n[BOOT] jumping\r\n");
+
+        boot_uart_flush();
+        bootloader_jump_to_app(default_load);
+    }
+}
