@@ -59,6 +59,10 @@ static int rz(int argc, char **argv)
 				  0,    /* 不限速 */
 				  RZSZ_FLAGS_NONE);
 
+	/* 失败时发送端可能仍在补发，接收缓冲里会残留半包二进制；
+	   不清掉的话回到 shell 会被当成命令回显执行 */
+	boot_uart_rx_flush();
+
 	shell_putstr("[rz] received ");
 	shell_putdec((uint32_t)received);
 	shell_putstr(" bytes\r\n");
@@ -77,7 +81,7 @@ static int rz(int argc, char **argv)
 	shell_putstr("\r\n");
 
 	if(0U == received) {
-		shell_putstr("[rz] no data, abort\r\n");
+		shell_putstr("[rz] transfer failed or no data, abort\r\n");
 		return 0;
 	}
 	if(received > target_size) {

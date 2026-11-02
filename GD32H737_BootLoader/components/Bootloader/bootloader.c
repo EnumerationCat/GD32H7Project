@@ -122,6 +122,22 @@ int boot_getc_timeout(uint32_t timeout_ms)
     return -1;
 }
 
+/* ZMODEM 失败后发送端可能还在补发，ring buffer 里会残留半包二进制、
+   终端回显（如 xterm 应答）也会混进来。先关接收中断，清空软件/硬件
+   缓冲再恢复，否则 shell 会把这些字节当命令执行。 */
+void boot_uart_rx_flush(void)
+{
+    usart_interrupt_disable(BOOT_UART, USART_INT_RBNE);
+    ring_buffer_init(&g_uart_rx);
+
+    while(RESET != usart_flag_get(BOOT_UART, USART_FLAG_RBNE)) {
+        (void)usart_data_receive(BOOT_UART);
+    }
+    usart_flag_clear(BOOT_UART, USART_FLAG_ORERR);
+
+    usart_interrupt_enable(BOOT_UART, USART_INT_RBNE);
+}
+
 
 
 /* SysTick 轮询计时：不启用中断，跳转前 jump_to_app 会把它关掉 */

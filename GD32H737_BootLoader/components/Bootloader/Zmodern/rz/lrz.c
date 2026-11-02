@@ -284,7 +284,9 @@ size_t zmodem_receive(const char *directory,
 	前两个字节。这里把残留字节丢弃，否则回到 shell 会被当成命令执行。 */
 	while (zport_getc(100) >= 0) {
 	}
-	return zmodem_file_size();
+	/* 传输失败时缓冲区里只是半截镜像，返回 0 让调用层直接放弃，
+	   不要暴露部分长度（否则会被当成一整个文件去解析/烧写） */
+	return exitcode ? (size_t)0 : zmodem_file_size();
 }
 
 

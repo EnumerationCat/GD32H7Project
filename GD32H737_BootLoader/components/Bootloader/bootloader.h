@@ -72,6 +72,10 @@ void boot_puts(const char *s);
 int  boot_getc(void);                                  /* 无数据返回 -1 */
 int  boot_getc_timeout(uint32_t timeout_ms);           /* 超时返回 -1，否则 0~255 */
 
+/* 丢弃串口接收侧所有残留字节（ring buffer + 硬件 FIFO）。
+   ZMODEM 失败/结束后调用，避免半包被 shell 当成命令回显执行。 */
+void boot_uart_rx_flush(void);
+
 /* 无格式化输出的整数打印 */
 void boot_putdec(uint32_t v);
 void boot_puthex32(uint32_t v);
