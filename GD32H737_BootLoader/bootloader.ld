@@ -6,8 +6,8 @@ __HEAP_SIZE  = 0x10000;
 
 MEMORY
 {
-    /* 前 64K 固定给 bootloader，App 从 0x08010000 开始 */
-    FLASH       (rx)    : ORIGIN = 0x08000000, LENGTH = 64K
+    /* 前 60K 给 bootloader，0x0800F000 起 4K 为启动配置扇区，App 从 0x08010000 开始 */
+    FLASH       (rx)    : ORIGIN = 0x08000000, LENGTH = 60K
     /* 共享 RAM 512K 由选项字节全部分配为 256K ITCM + 256K DTCM，无 AXI 共享段 */
     AXISRAM     (xrw)   : ORIGIN = 0x24000000, LENGTH = 512K
     ITCMRAM     (xrw)   : ORIGIN = 0x00000000, LENGTH = 256K
@@ -125,3 +125,6 @@ SECTIONS
     /DISCARD/ : { libc.a ( * ) libm.a ( * ) libgcc.a ( * ) }
     .ARM.attributes 0 : { *(.ARM.attributes) }
 }
+
+ASSERT(_etext <= 0x0800F000, "bootloader overlaps boot config sector")
+ASSERT(_sidata + SIZEOF(.data) <= 0x0800F000, "bootloader .data overlaps boot config sector")

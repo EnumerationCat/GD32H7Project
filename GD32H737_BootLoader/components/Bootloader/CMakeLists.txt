@@ -9,6 +9,7 @@ target_include_directories(bootloader PRIVATE
 
 target_sources(bootloader PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/bootloader.c"
+	"${CMAKE_CURRENT_LIST_DIR}/boot_flash.c"
 	"${CMAKE_CURRENT_LIST_DIR}/ring_buffer.c"
 	"${CMAKE_CURRENT_LIST_DIR}/Shell/shell.c"
 	"${CMAKE_CURRENT_LIST_DIR}/Shell/command.c"

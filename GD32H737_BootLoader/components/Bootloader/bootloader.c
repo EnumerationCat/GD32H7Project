@@ -1,31 +1,11 @@
+#include <stddef.h>
+
 #include "bootloader.h"
+#include "boot_flash.h"
 #include "shell.h"
 #include "ring_buffer.h"
 #include "gd32h7xx.h"
 #include "gd32h7xx_fmc.h"
-
-
-
-
-typedef unsigned int __be32;
-
-#define IH_MAGIC	0x27051956	/* Image Magic Number		*/
-#define IH_NMLEN	32	/* Image Name Length		*/
-
-typedef struct image_header {
-	__be32		ih_magic;	/* Image Header Magic Number	*/
-	__be32		ih_hcrc;	/* Image Header CRC Checksum	*/
-	__be32		ih_time;	/* Image Creation Timestamp	*/
-	__be32		ih_size;	/* Image Data Size		*/
-	__be32		ih_load;	/* Data	 Load  Address		*/
-	__be32		ih_ep;		/* Entry Point Address		*/
-	__be32		ih_dcrc;	/* Image Data CRC Checksum	*/
-	uint8_t		ih_os;		/* Operating System		*/
-	uint8_t		ih_arch;	/* CPU architecture		*/
-	uint8_t		ih_type;	/* Image Type			*/
-	uint8_t		ih_comp;	/* Compression Type		*/
-	uint8_t		ih_name[IH_NMLEN];	/* Image Name		*/
-} image_header_t;
 
 
 
@@ -238,24 +218,47 @@ static uint32_t ih_be32(__be32 v)
     return __builtin_bswap32((uint32_t)v);
 }
 
-int bootloader_app_is_valid(uint32_t image_base, uint32_t *app_base)
+/* 标准 CRC-32（反射多项式 0xEDB88320，init/xorout 均为 0xFFFFFFFF），
+   与 u-boot crc32(0, buf, len) 一致 */
+static uint32_t boot_crc32(const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = 0xFFFFFFFFU;
+
+    while(len-- > 0U) {
+        crc ^= *data++;
+        for(uint32_t i = 0U; i < 8U; i++) {
+            crc = (crc >> 1) ^ (0xEDB88320U & (uint32_t)-(int32_t)(crc & 1U));
+        }
+    }
+    return ~crc;
+}
+
+int bootloader_image_parse(uint32_t image_base, uint32_t src_len,
+                           uint32_t slot_base, uint32_t slot_end,
+                           int verify_crc, boot_image_info_t *info)
 {
     const image_header_t *hdr = (const image_header_t *)image_base;
-    uint32_t load, ep, size, sp, pc;
+    uint32_t load, ep, size, src_load, sp, pc;
 
-    if(IH_MAGIC != ih_be32(hdr->ih_magic)) {
+    if((src_len < (IMAGE_HEADER_SIZE + 8U)) || (slot_end <= (slot_base + IMAGE_HEADER_SIZE))) {
+        return 0;
+    }
+    if(IMAGE_MAGIC != ih_be32(hdr->ih_magic)) {
         return 0;
     }
 
-    load = ih_be32(hdr->ih_load);//app start 的位置
-    ep   = ih_be32(hdr->ih_ep);  //app reset_handler的位置
-    size = ih_be32(hdr->ih_size);//app的大小
+    load = ih_be32(hdr->ih_load);
+    ep   = ih_be32(hdr->ih_ep);
+    size = ih_be32(hdr->ih_size);
 
-    /* 数据须落在 App 分区内，且不能覆盖 uImage 头本身 */
-    if((load < (APP_BASE_ADDR + sizeof(image_header_t))) || (load >= FLASH_END_ADDR)) {
+    /* 数据须完整落在源缓冲区和目标槽内，且不覆盖 uImage 头 */
+    if(size > (src_len - IMAGE_HEADER_SIZE)) {
         return 0;
     }
-    if(size > (FLASH_END_ADDR - load)) {
+    if(size > (slot_end - slot_base - IMAGE_HEADER_SIZE)) {
+        return 0;
+    }
+    if((load < (slot_base + IMAGE_HEADER_SIZE)) || (load >= slot_end)) {
         return 0;
     }
 
@@ -266,32 +269,68 @@ int bootloader_app_is_valid(uint32_t image_base, uint32_t *app_base)
         return 0;
     }
 
-    /* 入口点须在 App 的 Flash 区间内，且末位为 1（Thumb 位） */
-    if((ep < load) || (ep >= FLASH_END_ADDR)) {
+    /* 入口点须在槽内，且末位为 1（Thumb 位） */
+    if((ep < load) || (ep >= slot_end)) {
         return 0;
     }
     if(0U == (ep & 1U)) {
         return 0;
     }
 
-    sp = *(volatile uint32_t *)load;
-    pc = *(volatile uint32_t *)(load + 4U);
+    /* 向量表从源镜像取，而不是目标槽（rz 时目标槽还是旧内容） */
+    if((load - slot_base) > (src_len - IMAGE_HEADER_SIZE - 8U)) {
+        return 0;
+    }
+    src_load = image_base + (load - slot_base);
+    sp = *(volatile uint32_t *)src_load;
+    pc = *(volatile uint32_t *)(src_load + 4U);
 
     /* 栈顶必须落在 App 使用的 RAM 区间内 */
     if((sp < APP_SRAM_START) || (sp > APP_SRAM_END)) {
         return 0;
     }
 
-    /* 复位向量必须落在 App 的 Flash 区间内，且末位为 1（Thumb 位） */
-    if((pc < load) || (pc >= FLASH_END_ADDR)) {
+    /* 复位向量必须落在槽内，且末位为 1（Thumb 位） */
+    if((pc < load) || (pc >= slot_end)) {
         return 0;
     }
     if(0U == (pc & 1U)) {
         return 0;
     }
 
-    *app_base = load;
+    if(verify_crc) {
+        image_header_t hdr_copy = *hdr;
+
+        /* ih_hcrc 在计算时按 0 处理 */
+        hdr_copy.ih_hcrc = 0;
+        if(boot_crc32((const uint8_t *)&hdr_copy, IMAGE_HEADER_SIZE) != ih_be32(hdr->ih_hcrc)) {
+            return 0;
+        }
+        if(boot_crc32((const uint8_t *)image_base + IMAGE_HEADER_SIZE, size) != ih_be32(hdr->ih_dcrc)) {
+            return 0;
+        }
+    }
+
+    if(NULL != info) {
+        info->image_base = image_base;
+        info->load       = load;
+        info->ep         = ep;
+        info->size       = size;
+        info->dcrc       = ih_be32(hdr->ih_dcrc);
+    }
     return 1;
+}
+
+static uint32_t g_boot_target;
+
+void boot_set_target(uint32_t load_addr)
+{
+    g_boot_target = load_addr;
+}
+
+uint32_t boot_get_target(void)
+{
+    return g_boot_target;
 }
 
 void bootloader_jump_to_app(uint32_t app_base)
@@ -359,37 +398,105 @@ static void boot_tcm_shared_ram_ensure(void)
     }
 }
 
+static void boot_dump_slot(char slot, int valid, const boot_image_info_t *info)
+{
+    boot_puts("[BOOT] slot ");
+    boot_putc((uint8_t)slot);
+    boot_puts(": image=");
+    boot_puthex32((slot == 'A') ? APP_SLOT_A_ADDR : APP_SLOT_B_ADDR);
+
+    if(!valid) {
+        boot_puts(" invalid\r\n");
+        return;
+    }
+
+    boot_puts(" load=");
+    boot_puthex32(info->load);
+    boot_puts(" ep=");
+    boot_puthex32(info->ep);
+    boot_puts(" size=");
+    boot_putdec(info->size);
+    boot_puts(" valid\r\n");
+}
+
 int main(void)
 {
-    uint32_t app_base = 0U;
+    boot_image_info_t img_a;
+    boot_image_info_t img_b;
+    int a_ok, b_ok, active;
+    uint32_t default_load = 0U;
 
     /* SystemInit() 已由 Reset_Handler 调用：时钟就绪，VTOR = 0x08000000 */
     boot_uart_init();
 
     boot_tcm_shared_ram_ensure();
 
-	
+    a_ok = bootloader_image_parse(APP_SLOT_A_ADDR, APP_SLOT_A_SIZE,
+                                  APP_SLOT_A_ADDR, APP_SLOT_A_END, 1, &img_a);
+    b_ok = bootloader_image_parse(APP_SLOT_B_ADDR, APP_SLOT_B_SIZE,
+                                  APP_SLOT_B_ADDR, APP_SLOT_B_END, 1, &img_b);
 
-    if(bootloader_app_is_valid(APP_BASE_ADDR, &app_base)) {
-        /* 跳转前留 5 秒窗口：按任意键进 shell，输入 boot 退出并继续跳转 */
-        if(boot_wait_key(5000U)) {
-            shell();
+    boot_dump_slot('A', a_ok, &img_a);
+    boot_dump_slot('B', b_ok, &img_b);
 
-        }
-		boot_puts("[BOOT] uImage valid  load=");
-		boot_puthex32(app_base);
-		boot_puts(" msp=");
-		boot_puthex32(*(volatile uint32_t *)app_base);
-		boot_puts(" reset_handle=");
-		boot_puthex32(*(volatile uint32_t *)(app_base + 4U));
-		boot_puts("\r\n");
-        boot_puts("[BOOT] shell exited, jumping\r\n");		
-
-        boot_uart_flush();
-        bootloader_jump_to_app(app_base);
+    /* 配置指定的槽无效时回退到另一个有效槽 */
+    active = boot_cfg_get_active_slot();
+    if((1 == active) && b_ok) {
+        default_load = img_b.load;
+    } else if(a_ok) {
+        default_load = img_a.load;
+    } else if(b_ok) {
+        default_load = img_b.load;
     }
 
-    boot_puts("[BOOT] no valid uImage, stay in bootloader\r\n");
+    boot_puts("[BOOT] next boot slot: ");
+    if(0U == default_load) {
+        boot_puts("none\r\n");
+    } else if(a_ok && (default_load == img_a.load)) {
+        boot_puts("A\r\n");
+    } else {
+        boot_puts("B\r\n");
+    }
+
     for(;;) {
+        int enter_shell = 0;
+
+        if(0U != default_load) {
+            /* 跳转前留 5 秒窗口：按任意键进 shell */
+            if(boot_wait_key(5000U)) {
+                enter_shell = 1;
+            }
+        } else {
+            boot_puts("[BOOT] no valid image, entering shell\r\n");
+            enter_shell = 1;
+        }
+
+        if(enter_shell) {
+            uint32_t target;
+
+            shell();
+
+            /* boot 命令校验通过后才返回；目标地址由 boot_cmd 设置 */
+            target = boot_get_target();
+            if(0U != target) {
+                boot_puts("[BOOT] boot command -> load=");
+                boot_puthex32(target);
+                boot_puts("\r\n");
+                boot_uart_flush();
+                bootloader_jump_to_app(target);
+            }
+            continue;
+        }
+
+        boot_puts("[BOOT] uImage valid load=");
+        boot_puthex32(default_load);
+        boot_puts(" msp=");
+        boot_puthex32(*(volatile uint32_t *)default_load);
+        boot_puts(" reset_handle=");
+        boot_puthex32(*(volatile uint32_t *)(default_load + 4U));
+        boot_puts("\r\n[BOOT] jumping\r\n");
+
+        boot_uart_flush();
+        bootloader_jump_to_app(default_load);
     }
 }
