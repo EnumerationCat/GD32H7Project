@@ -27,7 +27,7 @@ void user_home(void)
 
     // 按钮添加文字（相机图标/文字）
     lv_obj_t *btn_label = lv_label_create(button);
-    lv_label_set_text(btn_label, "button0");
+    lv_label_set_text(btn_label, "APPB");
     lv_obj_center(btn_label);
 }
 
