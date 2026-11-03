@@ -9,6 +9,7 @@ static struct command * g_commands[] = {
 	&boot_cmd,
 	&jump_cmd,
 	&exit_cmd,
+	&reboot_cmd,
 	&rz_cmd,
 	NULL
 };

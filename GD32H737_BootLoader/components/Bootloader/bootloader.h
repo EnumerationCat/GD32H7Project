@@ -72,6 +72,9 @@ void boot_puts(const char *s);
 int  boot_getc(void);                                  /* 无数据返回 -1 */
 int  boot_getc_timeout(uint32_t timeout_ms);           /* 超时返回 -1，否则 0~255 */
 
+/* 等 TX 移位寄存器清空，确保复位/跳转前最后几个字节已发出 */
+void boot_uart_flush(void);
+
 /* 丢弃串口接收侧所有残留字节（ring buffer + 硬件 FIFO）。
    ZMODEM 失败/结束后调用，避免半包被 shell 当成命令回显执行。 */
 void boot_uart_rx_flush(void);

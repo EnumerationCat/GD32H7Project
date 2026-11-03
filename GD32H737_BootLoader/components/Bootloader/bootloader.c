@@ -213,7 +213,7 @@ static int boot_wait_key(uint32_t timeout_ms)
 }
 
 /* 等最后一个字节真正移出，避免跳转后 App 重配串口把它掐掉 */
-static void boot_uart_flush(void)
+void boot_uart_flush(void)
 {
     while(RESET == usart_flag_get(BOOT_UART, USART_FLAG_TC)) {
     }

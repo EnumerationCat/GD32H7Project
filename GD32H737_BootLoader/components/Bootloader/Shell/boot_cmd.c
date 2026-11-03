@@ -5,6 +5,7 @@
 #include "boot_flash.h"
 #include "shell.h"
 #include "string.h"
+#include "gd32h7xx.h"
 
 static int boot_parse_u32(const char *s, uint32_t *out)
 {
@@ -166,6 +167,18 @@ static int boot_f(int argc, char **argv)
 	return 0;
 }
 
+static int reboot_f(int argc, char **argv)
+{
+	(void)argc;
+	(void)argv;
+
+	shell_putstr("[reboot] system reset\r\n");
+	boot_uart_flush();
+	NVIC_SystemReset();
+
+	return 0;
+}
+
 struct command boot_cmd = {
 	"boot",
 
@@ -200,4 +213,15 @@ struct command exit_cmd = {
 	"       exit [a|b|0xADDR], alias of boot\r\n",
 
 	boot_f,
+};
+
+struct command reboot_cmd = {
+	"reboot",
+
+	"reset the MCU and restart the bootloader\r\n",
+
+	"Usage: \r\n"
+	"       reboot, reset the MCU (restart bootloader)\r\n",
+
+	reboot_f,
 };

@@ -6,5 +6,6 @@
 extern struct command boot_cmd;
 extern struct command jump_cmd;
 extern struct command exit_cmd;
+extern struct command reboot_cmd;
 
 #endif
