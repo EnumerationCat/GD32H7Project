@@ -34,6 +34,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/demos/keypad_encoder"
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/demos/benchmark"
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/user_home"
+	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/app_shell"
 
     
 )
@@ -305,4 +306,5 @@ target_sources(${PROJECT_NAME} PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/demos/benchmark/assets/lv_font_bechmark_montserrat_28_compr_az.c.c"
 
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/user_home/user_home.c"
+	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/app_shell/app_shell.c"
 )

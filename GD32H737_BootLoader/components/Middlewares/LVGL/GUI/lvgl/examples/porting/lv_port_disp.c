@@ -63,7 +63,11 @@ void lv_port_disp_init(void)
      * -----------------------*/
     disp_init();
 
-	
+    /* 横屏显示：480x320。lcddev.width/height 随之交换，
+       LVGL 与触摸驱动（tp_init 读 lcddev.dir）都按横屏工作 */
+    lcd_display_dir(1);
+
+
     /*-----------------------------
      * Create a buffer for drawing
      *----------------------------*/

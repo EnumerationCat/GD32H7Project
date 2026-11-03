@@ -1,6 +1,7 @@
 #include "user_home.h"
 #include "lv_btn.h"
 #include "lv_disp.h"
+#include "app_shell.h"
 
 
 
@@ -10,6 +11,13 @@ lv_obj_t *screen = NULL;
 
 
 
+
+static void app_shell_button_cb(lv_event_t *e)
+{
+    if(LV_EVENT_CLICKED == lv_event_get_code(e)) {
+        app_shell();
+    }
+}
 
 void user_home(void)
 {
@@ -29,6 +37,16 @@ void user_home(void)
     lv_obj_t *btn_label = lv_label_create(button);
     lv_label_set_text(btn_label, "APPA");
     lv_obj_center(btn_label);
+
+    // ==================== 进入 App Shell 按钮 ====================
+    lv_obj_t *shell_button = lv_btn_create(object);
+    lv_obj_set_size(shell_button, 80, 50);      // 与上方按钮区分，文字更宽
+    lv_obj_set_pos(shell_button, 90, 210);
+    lv_obj_add_event_cb(shell_button, app_shell_button_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *shell_label = lv_label_create(shell_button);
+    lv_label_set_text(shell_label, "SHELL");
+    lv_obj_center(shell_label);
 }
 
 
