@@ -52,6 +52,10 @@ static int rz(int argc, char **argv)
 	shell_putdec((uint32_t)zmodem_file_capacity());
 	shell_putstr(" bytes\r\n");
 
+	/* 丢掉进入 ZMODEM 前 RX 侧残留（命令行的换行、终端应答、上次会话尾部），
+	   避免启动阶段把 ZRQINIT/ZFILE 的字节对齐打乱 */
+	boot_uart_rx_flush();
+
 	received = zmodem_receive(NULL, /* 文件名由发送端决定，这里只关心内容 */
 				  NULL, /* 不限制文件 */
 				  NULL, /* 无进度回调 */

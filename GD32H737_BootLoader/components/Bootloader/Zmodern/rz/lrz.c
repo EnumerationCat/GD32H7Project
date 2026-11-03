@@ -42,6 +42,12 @@
 
 #define MAX_BLOCK 8192
 
+/* 首次等待发送端的轮数，每轮重发一次 ZRINIT 并等待约 3s。
+   用户往往要手动在终端里敲 sz（或图形终端里选文件），15s 太短：
+   一旦超过等待窗口，接收端会退回 YMODEM 分支，之后发送端每个数据包
+   都收到 NAK，表现为“第一次传必定失败、第二次才成功”。 */
+#define ZRINIT_STARTUP_ROUNDS 20
+
 const char *program_name;		/* the name by which we were called */
 
 //static int no_timeout=FALSE;
@@ -982,7 +988,7 @@ rz_zmodem_session_startup(rz_t *rz)
 	   On startup rz->tryzhdrtype is, by default, set to ZRINIT
 	*/
 
-	for (n=rz->zm->zmodem_requested?15:5;
+	for (n=rz->zm->zmodem_requested?15:ZRINIT_STARTUP_ROUNDS;
 		 (--n + zrqinits_received) >=0 && zrqinits_received<10; ) {
 		/* Set buffer length (0) and capability flags */
 
