@@ -25,6 +25,7 @@
 // #include "lv_demo_keypad_encoder.h"
 // #include "lv_demo_benchmark.h"
 #include "user_home.h"
+#include "app_shell.h"
 #include "gd32h7xx_misc.h"
 
 //#include "timer.h"
@@ -287,13 +288,16 @@ void uart_task(void * pvParameters)
 
     while (1)
     {
-		
-        /* Recv 超时单位是 tick；收到一个字节就发回去 */
+        /* 先阻塞等一个字节，再把队列里已有的尽快取完，
+           避免 1ms/字节 的节奏跟不上串口速率导致丢数据 */
         if (0 == uart_dev->Recv(uart_dev, &data, 100))
         {
-            uart_dev->Send(uart_dev, &data, 1, 100);
+            do
+            {
+                uart_dev->Send(uart_dev, &data, 1, 100);
+                app_shell_rx_push(&data, 1);
+            } while (0 == uart_dev->Recv(uart_dev, &data, 0));
         }
-		vTaskDelay(1);
     }
 }
 
