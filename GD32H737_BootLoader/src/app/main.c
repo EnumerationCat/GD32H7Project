@@ -42,6 +42,10 @@ void freertos_start(void);
 
 int main(void)
 {
+    /* printf 对字符设备默认走行缓冲，"app_shell> " 这种不带换行的提示符会一直
+       留在 stdio 缓冲里发不出去；改成无缓冲后每次 printf 立即通过串口发出 */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     /* FreeRTOS 要求所有抢占优先级位都用作抢占位。SPL 的 nvic_irq_enable 在分组仍是
        复位值时会自动改成 PRE2_SUB2，之后 FreeRTOS 的 FromISR 优先级校验断言失败
        （configASSERT 是关中断死循环），必须在任何 nvic_irq_enable 之前设置好 */
@@ -278,7 +282,8 @@ void task2(void * pvParameters)
 }
 
 
-/* 串口实验任务：启动时发一串提示，之后收到的字节原样回显 */
+/* 串口实验任务：启动时发一串提示，之后把收到的字节交给 app_shell。
+   回显由 app_shell 负责（退格需要 "\b \b"，不能原样回显 0x7F） */
 void uart_task(void * pvParameters)
 {
     static const char banner[] = "uart task ready, echo mode\r\n";
@@ -300,7 +305,6 @@ void uart_task(void * pvParameters)
         {
             do
             {
-                uart_dev->Send(uart_dev, &data, 1, 100);
                 app_shell_rx_push(&data, 1);
             } while (0 == uart_dev->Recv(uart_dev, &data, 0));
         }
