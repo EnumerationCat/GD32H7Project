@@ -1310,7 +1310,7 @@ nxthdr:
 			}
 moredata:
 			if ((rz->min_bps || rz->stop_time || rz->tick_cb)
-			    && (not_printed > (rz->min_bps ? 3 : 7)
+			    && (not_printed > (rz->min_bps ? 3 : 0)
 				|| zi->bytes_received > last_bps / 2 + last_rxbytes)) {
 //				int minleft =  0;
 //				int secleft =  0;
@@ -1346,13 +1346,11 @@ moredata:
 				//	return ERROR;
 				//}
 
-				//log_info(_("\rBytes received: %7ld/%7ld   BPS:%-6ld ETA %02d:%02d  "),
-				//	 (long) zi->bytes_received, (long) zi->bytes_total,
-				//	 last_bps, minleft, secleft);
-				//if (rz->tick_cb)
-				//	rz->tick_cb(zi->fname, zi->bytes_received,
-				//		    zi->bytes_total, last_bps, minleft,
-				//		    secleft);
+				/* 原版这里只在终端打进度；本移植改为回调里更新 LCD。
+				   minleft/secleft 未计算（timing 未启用），传 0。 */
+				if (rz->tick_cb)
+					rz->tick_cb(zi->fname, zi->bytes_received,
+						    zi->bytes_total, last_bps, 0, 0);
 				last_rxbytes=zi->bytes_received;
 				not_printed=0;
 			} else

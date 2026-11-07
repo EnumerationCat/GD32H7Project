@@ -342,13 +342,18 @@ void boot_display_poll(void)
         return;
     }
 
-    /* 一次 poll 之间可能追加了多行（命令输出），逐行补画，不能只画最后一行 */
+    /* 一次 poll 之间可能追加了多行（命令输出），逐行补画，不能只画最后一行。
+       旧内容以 '\n' 结尾时，缓冲末尾已经算出一行空的“最后一行”，新输出先填这
+       一行再靠新的 '\n' 才让行数增加；只从 seen_total 开始画会漏掉被填满的
+       那一行（表现为最后几行不显示），所以回退一行重画。 */
     if(total > s_disp_seen_total) {
-        while(s_disp_seen_total < total) {
-            boot_disp_draw_line(s_disp_seen_total,
-                                (uint16_t)(s_disp_seen_total * BOOT_DISP_FONT));
-            s_disp_seen_total++;
+        uint32_t first = (s_disp_seen_total > 0U) ? (s_disp_seen_total - 1U) : 0U;
+
+        while(first < total) {
+            boot_disp_draw_line(first, (uint16_t)(first * BOOT_DISP_FONT));
+            first++;
         }
+        s_disp_seen_total = total;
         return;
     }
 
@@ -362,6 +367,43 @@ void boot_display_poll(void)
 void boot_display_suspend(int suspend)
 {
     s_disp_suspended = suspend;
+}
+
+/* 传输期间的状态行：绕开 suspend 只写屏幕日志，并立即刷新。
+   用 "\r" 覆盖当前行，所以反复调用不会在日志里堆出多行。 */
+void boot_display_progress(const char *s)
+{
+    int saved;
+
+    if(0 == s_disp_ready) {
+        return;
+    }
+
+    saved = s_disp_suspended;
+    s_disp_suspended = 0;
+    boot_display_putc('\r');
+    while('\0' != *s) {
+        boot_display_putc(*s++);
+    }
+    s_disp_suspended = saved;
+
+    boot_display_poll();
+}
+
+/* 状态行结束：补一个换行，后面的日志另起一行 */
+void boot_display_progress_end(void)
+{
+    int saved;
+
+    if((0 == s_disp_ready) || (0U == s_disp_len) ||
+       ('\n' == s_disp[s_disp_len - 1U])) {
+        return;
+    }
+
+    saved = s_disp_suspended;
+    s_disp_suspended = 0;
+    boot_display_putc('\n');
+    s_disp_suspended = saved;
 }
 
 void boot_display_init(void)

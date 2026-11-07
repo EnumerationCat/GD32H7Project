@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "zmodem.h"
 #include "command.h"
@@ -35,6 +36,64 @@ static int rz_pick_target_slot(void)
 	return other;
 }
 
+/* 无 printf 的十进制转换：bootloader 不链接格式化库 */
+static uint32_t rz_dec(char *p, uint32_t v)
+{
+	char tmp[10];
+	uint32_t n = 0U;
+	uint32_t i;
+
+	do {
+		tmp[n++] = (char)('0' + (v % 10U));
+		v /= 10U;
+	} while(0U != v);
+
+	for(i = 0U; i < n; i++) {
+		p[i] = tmp[n - 1U - i];
+	}
+	return n;
+}
+
+/* ZMODEM 收包间隙回调：只在 LCD 上刷新一行进度，不往串口写 */
+static bool rz_tick(const char *fname, long bytes_sent, long bytes_total,
+		    long last_bps, int min_left, int sec_left)
+{
+	char line[64];
+	uint32_t n = 0U;
+	uint32_t recv = (uint32_t)bytes_sent;
+	uint32_t total = (uint32_t)bytes_total;
+	uint32_t pct = 0U;
+
+	(void)fname;
+	(void)last_bps;
+	(void)min_left;
+	(void)sec_left;
+
+	if(total > 0U) {
+		pct = (uint32_t)(((unsigned long)recv * 100UL) / (unsigned long)total);
+		if(pct > 100U) {
+			pct = 100U;
+		}
+	}
+
+	memcpy(line, "[rz] receiving ", 15U);
+	n = 15U;
+	n += rz_dec(&line[n], recv);
+	line[n++] = ' ';
+	line[n++] = '/';
+	line[n++] = ' ';
+	n += rz_dec(&line[n], total);
+	line[n++] = ' ';
+	line[n++] = '(';
+	n += rz_dec(&line[n], pct);
+	line[n++] = '%';
+	line[n++] = ')';
+	line[n] = '\0';
+
+	boot_display_progress(line);
+	return true;
+}
+
 static int rz(int argc, char **argv)
 {
 	size_t received;
@@ -46,12 +105,25 @@ static int rz(int argc, char **argv)
 	(void)argc;
 	(void)argv;
 
-	shell_putstr("\r\n[rz] waiting for ZMODEM sender (send: sz -b u-boot_app.img)...\r\n");
+	target      = rz_pick_target_slot();
+	target_base = target ? APP_SLOT_B_ADDR : APP_SLOT_A_ADDR;
+	target_end  = target ? APP_SLOT_B_END  : APP_SLOT_A_END;
+	target_size = target ? APP_SLOT_B_SIZE : APP_SLOT_A_SIZE;
+
+	shell_putstr("\r\n[rz] waiting for ZMODEM sender (send: sz -b u-boot_app");
+	shell_putstr(target ? "B" : "A");
+	shell_putstr(".img)...\r\n");
 	shell_putstr("[rz] RAM buffer: ");
 	shell_puthex32((uint32_t)(uintptr_t)zmodem_file_buffer());
 	shell_putstr(" capacity: ");
 	shell_putdec((uint32_t)zmodem_file_capacity());
 	shell_putstr(" bytes\r\n");
+
+	/* 先把提示刷到屏幕：下面 zmodem_receive 会阻塞到传输结束 */
+	boot_display_poll();
+
+	/* 提前建好进度行，传输中只需覆盖最后一行，避免整屏重画拖慢收包 */
+	boot_display_progress("[rz] receiving ...");
 
 	/* 丢掉进入 ZMODEM 前 RX 侧残留（命令行的换行、终端应答、上次会话尾部），
 	   避免启动阶段把 ZRQINIT/ZFILE 的字节对齐打乱 */
@@ -61,11 +133,14 @@ static int rz(int argc, char **argv)
 	boot_display_suspend(1);
 	received = zmodem_receive(NULL, /* 文件名由发送端决定，这里只关心内容 */
 				  NULL, /* 不限制文件 */
-				  NULL, /* 无进度回调 */
+				  rz_tick, /* 收包间隙更新屏幕进度 */
 				  NULL, /* 无完成回调 */
 				  0,    /* 不限速 */
 				  RZSZ_FLAGS_NONE);
 	boot_display_suspend(0);
+
+	/* 进度行收尾，后续日志另起一行 */
+	boot_display_progress_end();
 
 	/* 失败时发送端可能仍在补发，接收缓冲里会残留半包二进制；
 	   不清掉的话回到 shell 会被当成命令回显执行 */
@@ -76,11 +151,6 @@ static int rz(int argc, char **argv)
 	shell_putstr(" bytes\r\n");
 
 	buf = zmodem_file_buffer();
-
-	target      = rz_pick_target_slot();
-	target_base = target ? APP_SLOT_B_ADDR : APP_SLOT_A_ADDR;
-	target_end  = target ? APP_SLOT_B_END  : APP_SLOT_A_END;
-	target_size = target ? APP_SLOT_B_SIZE : APP_SLOT_A_SIZE;
 
 	shell_putstr("[rz] target slot ");
 	shell_putstr(target ? "B" : "A");
@@ -119,11 +189,15 @@ static int rz(int argc, char **argv)
 	shell_putstr(target ? "B" : "A");
 	shell_putstr(" ...\r\n");
 
+	/* 擦除/写入/校验可能耗时较久，先让提示上屏 */
+	boot_display_poll();
+
 	if(!boot_flash_write_image(target_base, buf, (uint32_t)received)) {
 		shell_putstr("[rz] flash erase/write/verify FAILED\r\n");
 		return 0;
 	}
 	shell_putstr("[rz] flash verify OK\r\n");
+	boot_display_poll();
 
 	if(!boot_cfg_set_active_slot(target)) {
 		shell_putstr("[rz] boot config write FAILED\r\n");
