@@ -425,21 +425,26 @@ static void boot_tcm_shared_ram_ensure(void)
 
 static void boot_dump_slot(char slot, int valid, const boot_image_info_t *info)
 {
-    boot_puts("[BOOT] slot ");
+    boot_puts("\r\n[BOOT] slot ");
     boot_putc((uint8_t)slot);
-    boot_puts(": image=");
+    boot_puts(":\r\n");
+
+    boot_puts("  image=");
     boot_puthex32((slot == 'A') ? APP_SLOT_A_ADDR : APP_SLOT_B_ADDR);
+    boot_puts("\r\n");
 
     if(!valid) {
-        boot_puts(" invalid\r\n");
+        boot_puts("  invalid\r\n");
         return;
     }
 
-    boot_puts(" load=");
+    boot_puts("  load=");
     boot_puthex32(info->load);
-    boot_puts(" ep=");
+    boot_puts("\r\n");
+    boot_puts("  ep=");
     boot_puthex32(info->ep);
-    boot_puts(" size=");
+    boot_puts("\r\n");
+    boot_puts("  size=");
     boot_putdec(info->size);
     boot_puts(" valid\r\n");
 }
