@@ -8,7 +8,6 @@
 #include <stdio.h>
 
 #define APP_SHELL_LOG_SIZE   1024
-#define APP_SHELL_CMD_MAX    64
 #define APP_SHELL_PROMPT     "app_shell> "
 
 static lv_obj_t *home_screen = NULL;
@@ -24,17 +23,16 @@ static uint32_t s_shown_version = 0;
 static char s_tmp[APP_SHELL_LOG_SIZE + 1];
 static volatile int s_follow_bottom = 1;   /* 有本地输入时滚回最新位置 */
 
-/* 当前正在输入的一行命令，回车后由刷新定时器执行 */
-static char s_cmd[APP_SHELL_CMD_MAX + 1];
-static uint32_t s_cmd_len = 0;
-static volatile int s_cmd_ready = 0;
+/* 输入行、历史命令、方向键状态：与 bootloader 的 finsh_shell 一致 */
+static struct app_shell s_shell =
+{
+    .stat = WAIT_NORMAL,
+    .echo_mode = 1,
+    .prompt_mode = 1,
+};
 
-/* 历史命令：上下键翻看，行为与 bootloader shell 一致 */
-#define APP_SHELL_HISTORY_LINES  10
-static char s_history[APP_SHELL_HISTORY_LINES][APP_SHELL_CMD_MAX + 1];
-static int s_history_count = 0;
-static int s_history_cur = 0;     /* 0..count，count 表示正在编辑的新行 */
-static int s_esc_state = 0;       /* 0 无，1 收到 ESC，2 收到 ESC [，3 收到 ESC O */
+/* 回车后命令行等待刷新定时器执行 */
+static volatile int s_cmd_ready = 0;
 
 /* 以下日志操作要求调用者已进入临界区 */
 static void app_shell_log_putc(char c)
@@ -58,6 +56,21 @@ static void app_shell_log_puts(const char *s)
 {
     while('\0' != *s) {
         app_shell_log_putc(*s++);
+    }
+}
+
+/* 调用者需处于临界区：把日志尾部 old_len 个字符替换成当前输入行 */
+static void app_shell_log_replace_line(uint16_t old_len)
+{
+    uint16_t i;
+
+    if(s_log_len >= old_len) {
+        s_log_len -= old_len;
+    } else {
+        s_log_len = 0U;
+    }
+    for(i = 0U; i < s_shell.line_position; i++) {
+        app_shell_log_putc(s_shell.line[i]);
     }
 }
 
@@ -89,64 +102,82 @@ void app_shell_clear(void)
 /* 执行回车留下的一整行命令（在 LVGL 定时器里调用，可安全使用 printf） */
 static void app_shell_run_pending(void)
 {
-    char line[APP_SHELL_CMD_MAX + 1];
+    char line[APP_SHELL_CMD_SIZE + 1];
+    uint16_t len;
 
     if(0 == s_cmd_ready) {
         return;
     }
 
     taskENTER_CRITICAL();
-    memcpy(line, s_cmd, s_cmd_len);
-    line[s_cmd_len] = '\0';
-    s_cmd_len = 0;
+    len = s_shell.line_position;
+    if(len > APP_SHELL_CMD_SIZE) {
+        len = APP_SHELL_CMD_SIZE;
+    }
+    memcpy(line, s_shell.line, len);
+    line[len] = '\0';
+    s_shell.line_position = 0U;
+    s_shell.line_curpos = 0U;
+    s_shell.line[0] = '\0';
     s_cmd_ready = 0;
     taskEXIT_CRITICAL();
 
     app_shell_exec(line);
-    app_shell_putstr(APP_SHELL_PROMPT);
+    if(s_shell.prompt_mode) {
+        app_shell_putstr(APP_SHELL_PROMPT);
+    }
 }
 
-/* ---------------- 历史命令（上下键） ---------------- */
+/* ---------------- 历史命令 / 输入行重画 ---------------- */
 
-static void app_shell_history_push(const char *line)
+static void app_shell_history_push(struct app_shell *sh)
 {
-    size_t n;
-
-    if('\0' == line[0]) {
-        s_history_cur = s_history_count;
+    if(0U == sh->line_position) {
+        sh->current_history = sh->history_count;
         return;
     }
     /* 与上一条相同则不重复记录 */
-    if((s_history_count > 0) &&
-       (0 == strcmp(s_history[s_history_count - 1], line))) {
-        s_history_cur = s_history_count;
+    if((sh->history_count > 0U) &&
+       (0 == strcmp(sh->cmd_history[sh->history_count - 1U], sh->line))) {
+        sh->current_history = sh->history_count;
         return;
     }
 
-    if(s_history_count >= APP_SHELL_HISTORY_LINES) {
-        memmove(s_history[0], s_history[1],
-                sizeof(s_history[0]) * (APP_SHELL_HISTORY_LINES - 1));
-        s_history_count = APP_SHELL_HISTORY_LINES - 1;
+    if(sh->history_count >= APP_SHELL_HISTORY_LINES) {
+        memmove(sh->cmd_history[0], sh->cmd_history[1],
+                sizeof(sh->cmd_history[0]) * (APP_SHELL_HISTORY_LINES - 1U));
+        sh->history_count = APP_SHELL_HISTORY_LINES - 1U;
     }
 
-    n = strlen(line);
-    if(n > APP_SHELL_CMD_MAX) {
-        n = APP_SHELL_CMD_MAX;
+    memcpy(sh->cmd_history[sh->history_count], sh->line, sh->line_position + 1U);
+    sh->history_count++;
+    sh->current_history = sh->history_count;
+}
+
+/* 终端整行重画：擦掉旧提示符+输入行，重新输出，光标移回 line_curpos */
+static void app_shell_term_redraw(uint16_t old_len)
+{
+    char erase[APP_SHELL_CMD_SIZE + 32];
+    uint16_t back = (uint16_t)(s_shell.line_position - s_shell.line_curpos);
+    uint32_t n = (uint32_t)(sizeof(APP_SHELL_PROMPT) - 1U) + old_len;
+
+    if(n > (sizeof(erase) - 1U)) {
+        n = sizeof(erase) - 1U;
     }
-    memcpy(s_history[s_history_count], line, n);
-    s_history[s_history_count][n] = '\0';
-    s_history_count++;
-    s_history_cur = s_history_count;
+    memset(erase, ' ', n);
+    erase[n] = '\0';
+
+    printf("\r%s\r%s%s", erase, APP_SHELL_PROMPT, s_shell.line);
+    while(back > 0U) {
+        printf("\b");
+        back--;
+    }
 }
 
 /* 用历史命令替换当前输入行：LCD 日志尾部 + 终端整行重画 */
-static void app_shell_history_recall(int index)
+static void app_shell_history_recall(struct app_shell *sh, uint16_t index)
 {
-    char line[APP_SHELL_CMD_MAX + 1];
-    char erase[APP_SHELL_CMD_MAX + 32];
-    uint32_t old_len;
-    uint32_t new_len;
-    uint32_t n;
+    uint16_t old_len;
 
     taskENTER_CRITICAL();
 
@@ -156,57 +187,44 @@ static void app_shell_history_recall(int index)
         return;
     }
 
-    if(index < s_history_count) {
-        memcpy(line, s_history[index], sizeof(line));
-        line[APP_SHELL_CMD_MAX] = '\0';
-    } else {
-        line[0] = '\0';
-    }
+    old_len = sh->line_position;
 
-    old_len = s_cmd_len;
-    new_len = (uint32_t)strlen(line);
+    if(index < sh->history_count) {
+        memcpy(sh->line, sh->cmd_history[index], APP_SHELL_CMD_SIZE + 1U);
+    } else {
+        /* 翻过最后一条就是正在编辑的新行 */
+        sh->line[0] = '\0';
+    }
+    sh->line_position = (uint16_t)strlen(sh->line);
+    sh->line_curpos = sh->line_position;
 
     /* 当前输入的命令字符是日志的最后 old_len 个字符，先删掉再写入新命令 */
-    if(s_log_len >= old_len) {
-        s_log_len -= old_len;
-    } else {
-        s_log_len = 0U;
-    }
-    memcpy(s_cmd, line, new_len + 1U);
-    s_cmd_len = new_len;
-    for(uint32_t i = 0U; i < new_len; i++) {
-        app_shell_log_putc(line[i]);
-    }
+    app_shell_log_replace_line(old_len);
     s_log[s_log_len] = '\0';
     s_log_version++;
     s_follow_bottom = 1;
 
     taskEXIT_CRITICAL();
 
-    /* "\r" + 空格擦掉旧行 + "\r" + 提示符 + 新命令 */
-    n = (uint32_t)(sizeof(APP_SHELL_PROMPT) - 1U) + old_len;
-    if(n > (sizeof(erase) - 1U)) {
-        n = sizeof(erase) - 1U;
-    }
-    memset(erase, ' ', n);
-    erase[n] = '\0';
-
-    printf("\r%s\r%s%s", erase, APP_SHELL_PROMPT, line);
-}
-
-static void app_shell_history_up(void)
-{
-    if(s_history_cur > 0) {
-        s_history_cur--;
-        app_shell_history_recall(s_history_cur);
+    /* 光标在行尾，重画后不需要回移 */
+    if(sh->echo_mode) {
+        app_shell_term_redraw(old_len);
     }
 }
 
-static void app_shell_history_down(void)
+static void app_shell_history_up(struct app_shell *sh)
 {
-    if(s_history_cur < s_history_count) {
-        s_history_cur++;
-        app_shell_history_recall(s_history_cur);
+    if(sh->current_history > 0U) {
+        sh->current_history--;
+        app_shell_history_recall(sh, sh->current_history);
+    }
+}
+
+static void app_shell_history_down(struct app_shell *sh)
+{
+    if(sh->current_history < sh->history_count) {
+        sh->current_history++;
+        app_shell_history_recall(sh, sh->current_history);
     }
 }
 
@@ -214,6 +232,9 @@ static void app_shell_history_down(void)
 #define APP_SHELL_ECHO_CHAR       1
 #define APP_SHELL_ECHO_BACKSPACE  2
 #define APP_SHELL_ECHO_NEWLINE    3
+#define APP_SHELL_ECHO_LEFT       4
+#define APP_SHELL_ECHO_RIGHT      5
+#define APP_SHELL_ECHO_REDRAW     6
 
 /* 串口接收任务调用：把收到的字节追加到日志（\r\n 归一成单个换行），
    缓存一行命令，回车后由刷新定时器执行；同时负责回显到终端 */
@@ -227,74 +248,119 @@ void app_shell_rx_push(const uint8_t *data, uint32_t size)
     }
 
     for(i = 0U; i < size; i++) {
-        char c = (char)data[i];
+        uint8_t c = data[i];
         char echo_ch = 0;
+        uint16_t redraw_old = 0U;
         int echo = APP_SHELL_ECHO_NONE;
 
-        /* 方向键：ESC [ A/B（部分终端是 ESC O A/B）上翻/下翻历史 */
-        if(0x1B == data[i]) {
-            s_esc_state = 1;
+        /* 方向键：ESC [ A/B/C/D（部分终端是 ESC O A/B/C/D） */
+        if(0x1B == c) {
+            s_shell.stat = WAIT_SPEC_KEY;
             continue;
         }
-        if(1 == s_esc_state) {
-            if(0x5B == data[i]) {
-                s_esc_state = 2;        /* '[' */
-            } else if(0x4F == data[i]) {
-                s_esc_state = 3;        /* 'O' */
-            } else {
-                s_esc_state = 0;
+        if(WAIT_SPEC_KEY == s_shell.stat) {
+            if((0x5B == c) || (0x4F == c)) {
+                s_shell.stat = WAIT_FUNC_KEY;
+                continue;
             }
-            continue;
-        }
-        if((2 == s_esc_state) || (3 == s_esc_state)) {
-            s_esc_state = 0;
-            if(0x41 == data[i]) {
-                app_shell_history_up();
-            } else if(0x42 == data[i]) {
-                app_shell_history_down();
+            s_shell.stat = WAIT_NORMAL;    /* 不是方向键序列，按普通键处理 */
+        } else if(WAIT_FUNC_KEY == s_shell.stat) {
+            s_shell.stat = WAIT_NORMAL;
+
+            if(0x41 == c) {                 /* 上键：上一条历史 */
+                app_shell_history_up(&s_shell);
+            } else if(0x42 == c) {          /* 下键：下一条历史 */
+                app_shell_history_down(&s_shell);
+            } else if(0x44 == c) {          /* 左键：光标左移 */
+                if(s_shell.line_curpos > 0U) {
+                    s_shell.line_curpos--;
+                    echo = APP_SHELL_ECHO_LEFT;
+                }
+            } else if(0x43 == c) {          /* 右键：光标右移 */
+                if(s_shell.line_curpos < s_shell.line_position) {
+                    echo_ch = s_shell.line[s_shell.line_curpos];
+                    s_shell.line_curpos++;
+                    echo = APP_SHELL_ECHO_RIGHT;
+                }
+            }
+
+            if(s_shell.echo_mode) {
+                if(APP_SHELL_ECHO_LEFT == echo) {
+                    printf("\b");
+                } else if(APP_SHELL_ECHO_RIGHT == echo) {
+                    printf("%c", echo_ch);
+                }
             }
             continue;
         }
 
-        taskENTER_CRITICAL();
-
+        /* LF 跟在上一次 CR 后面时忽略，终端回车是 \r\n */
         if('\r' == c) {
-            c = '\n';
             last_was_cr = 1;
         } else if('\n' == c) {
             if(last_was_cr) {
                 last_was_cr = 0;
-                taskEXIT_CRITICAL();
                 continue;
             }
         } else {
             last_was_cr = 0;
         }
 
-        if('\n' == c) {
+        taskENTER_CRITICAL();
+
+        if(('\r' == c) || ('\n' == c)) {
             if(0 == s_cmd_ready) {
+                s_shell.line[s_shell.line_position] = '\0';
                 app_shell_log_putc('\n');
-                s_cmd[s_cmd_len] = '\0';
-                app_shell_history_push(s_cmd);
+                app_shell_history_push(&s_shell);
                 s_cmd_ready = 1;
                 echo = APP_SHELL_ECHO_NEWLINE;
             }
         } else if(('\b' == c) || (0x7F == c)) {
             /* 退格：只删正在输入的命令字符；没有可删的不回显，
                终端光标就不会越过提示符继续左移 */
-            if((0 == s_cmd_ready) && (s_cmd_len > 0U)) {
-                s_cmd_len--;
-                if(s_log_len > 0U) {
-                    s_log_len--;
+            if((0 == s_cmd_ready) && (s_shell.line_curpos > 0U)) {
+                if(s_shell.line_curpos < s_shell.line_position) {
+                    /* 行中间删除：LCD 日志里的整行重画 */
+                    redraw_old = s_shell.line_position;
+                    memmove(&s_shell.line[s_shell.line_curpos - 1U],
+                            &s_shell.line[s_shell.line_curpos],
+                            (uint32_t)(s_shell.line_position - s_shell.line_curpos) + 1U);
+                    s_shell.line_position--;
+                    s_shell.line_curpos--;
+                    app_shell_log_replace_line(redraw_old);
+                    echo = APP_SHELL_ECHO_REDRAW;
+                } else {
+                    s_shell.line_position--;
+                    s_shell.line_curpos--;
+                    s_shell.line[s_shell.line_position] = '\0';
+                    if(s_log_len > 0U) {
+                        s_log_len--;
+                    }
+                    echo = APP_SHELL_ECHO_BACKSPACE;
                 }
-                echo = APP_SHELL_ECHO_BACKSPACE;
             }
         } else if((c >= 0x20) && (c < 0x7F)) {
-            if((0 == s_cmd_ready) && (s_cmd_len < APP_SHELL_CMD_MAX)) {
-                s_cmd[s_cmd_len++] = c;
-                app_shell_log_putc(c);
-                echo_ch = c;
-                echo = APP_SHELL_ECHO_CHAR;
+            if((0 == s_cmd_ready) && (s_shell.line_position < APP_SHELL_CMD_SIZE)) {
+                if(s_shell.line_curpos < s_shell.line_position) {
+                    /* 行中间插入：LCD 日志里的整行重画 */
+                    redraw_old = s_shell.line_position;
+                    memmove(&s_shell.line[s_shell.line_curpos + 1U],
+                            &s_shell.line[s_shell.line_curpos],
+                            (uint32_t)(s_shell.line_position - s_shell.line_curpos) + 1U);
+                    s_shell.line[s_shell.line_curpos] = (char)c;
+                    s_shell.line_position++;
+                    s_shell.line_curpos++;
+                    app_shell_log_replace_line(redraw_old);
+                    echo = APP_SHELL_ECHO_REDRAW;
+                } else {
+                    s_shell.line[s_shell.line_position++] = (char)c;
+                    s_shell.line_curpos++;
+                    s_shell.line[s_shell.line_position] = '\0';
+                    app_shell_log_putc((char)c);
+                    echo_ch = (char)c;
+                    echo = APP_SHELL_ECHO_CHAR;
+                }
             }
         }
 
@@ -307,6 +373,9 @@ void app_shell_rx_push(const uint8_t *data, uint32_t size)
         taskEXIT_CRITICAL();
 
         /* 临界区外回显：退格必须发 "\b \b" 终端才会擦除字符 */
+        if(0 == s_shell.echo_mode) {
+            continue;
+        }
         switch(echo) {
         case APP_SHELL_ECHO_CHAR:
             printf("%c", echo_ch);
@@ -316,6 +385,15 @@ void app_shell_rx_push(const uint8_t *data, uint32_t size)
             break;
         case APP_SHELL_ECHO_NEWLINE:
             printf("\r\n");
+            break;
+        case APP_SHELL_ECHO_LEFT:
+            printf("\b");
+            break;
+        case APP_SHELL_ECHO_RIGHT:
+            printf("%c", echo_ch);
+            break;
+        case APP_SHELL_ECHO_REDRAW:
+            app_shell_term_redraw(redraw_old);
             break;
         default:
             break;

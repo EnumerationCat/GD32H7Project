@@ -8,7 +8,7 @@
 
 
 struct finsh_shell g_shell;
-static char *finsh_prompt_custom = "msh >";
+static char *finsh_prompt_custom = "boot_shell >";
 
 void shell_putstr(const char *str)
 {
