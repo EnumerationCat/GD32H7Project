@@ -8,6 +8,7 @@
 #include "shell.h"
 #include "bootloader.h"
 #include "boot_flash.h"
+#include "boot_display.h"
 
 static int rz_slot_valid(int slot)
 {
@@ -56,12 +57,15 @@ static int rz(int argc, char **argv)
 	   避免启动阶段把 ZRQINIT/ZFILE 的字节对齐打乱 */
 	boot_uart_rx_flush();
 
+	/* 传输过程中的协议字节不要镜像到屏幕日志 */
+	boot_display_suspend(1);
 	received = zmodem_receive(NULL, /* 文件名由发送端决定，这里只关心内容 */
 				  NULL, /* 不限制文件 */
 				  NULL, /* 无进度回调 */
 				  NULL, /* 无完成回调 */
 				  0,    /* 不限速 */
 				  RZSZ_FLAGS_NONE);
+	boot_display_suspend(0);
 
 	/* 失败时发送端可能仍在补发，接收缓冲里会残留半包二进制；
 	   不清掉的话回到 shell 会被当成命令回显执行 */

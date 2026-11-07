@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "bootloader.h"
+#include "boot_display.h"
 #include "parser.h"
 #include "string.h"
 #include <stdbool.h>
@@ -144,6 +145,9 @@ void shell(void)
 
     while (1)
     {
+        /* 串口输出镜像到屏幕：空闲时统一重绘 */
+        boot_display_poll();
+
         ch = finsh_getchar();
         if (ch < 0)
         {

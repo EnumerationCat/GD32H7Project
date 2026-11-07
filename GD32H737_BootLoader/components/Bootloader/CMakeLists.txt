@@ -5,10 +5,16 @@ target_include_directories(bootloader PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/Zmodern"
 	"${CMAKE_CURRENT_LIST_DIR}/Zmodern/rz"
 	"${CMAKE_CURRENT_LIST_DIR}/Zmodern/file"
+	"${CMAKE_SOURCE_DIR}/components/BSP/lcd"
+	"${CMAKE_SOURCE_DIR}/components/BSP/sys"
+	"${CMAKE_SOURCE_DIR}/components/BSP/usart"
 )
 
 target_sources(bootloader PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/bootloader.c"
+	"${CMAKE_CURRENT_LIST_DIR}/boot_display.c"
+	"${CMAKE_SOURCE_DIR}/components/BSP/lcd/lcd.c"
+	"${CMAKE_SOURCE_DIR}/components/BSP/lcd/lcd_ex.c"
 	"${CMAKE_CURRENT_LIST_DIR}/boot_flash.c"
 	"${CMAKE_CURRENT_LIST_DIR}/ring_buffer.c"
 	"${CMAKE_CURRENT_LIST_DIR}/Shell/shell.c"

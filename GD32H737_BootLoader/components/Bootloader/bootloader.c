@@ -2,6 +2,7 @@
 
 #include "bootloader.h"
 #include "boot_flash.h"
+#include "boot_display.h"
 #include "shell.h"
 #include "ring_buffer.h"
 #include "gd32h7xx.h"
@@ -74,6 +75,9 @@ void boot_putc(uint8_t c)
     while(RESET == usart_flag_get(BOOT_UART, USART_FLAG_TC)) {
     }
     usart_data_transmit(BOOT_UART, c);
+
+    /* 串口输出同时镜像到屏幕日志 */
+    boot_display_putc((char)c);
 }
 
 void boot_puts(const char *s)
@@ -199,6 +203,8 @@ static int boot_wait_key(uint32_t timeout_ms)
             boot_puts("\r\n");
             return 1;
         }
+
+        boot_display_poll();
 
         if(0U == remain_ms) {
             break;
@@ -361,6 +367,9 @@ void bootloader_jump_to_app(uint32_t app_base)
     SysTick->LOAD = 0U;
     SysTick->VAL  = 0U;
 
+    /* 屏幕用的 MPU 区域也恢复默认，App 自己会重新配置 */
+    ARM_MPU_Disable();
+
     /* 关闭并清除所有 NVIC 中断 */
     for(uint32_t i = 0U; i < 8U; i++) {
         NVIC->ICER[i] = 0xFFFFFFFFU;
@@ -446,6 +455,9 @@ int main(void)
     boot_uart_init();
 
     boot_tcm_shared_ram_ensure();
+
+    /* 上电先把屏幕铺成黑底（与 App shell 页面一致，不带关闭按钮） */
+    boot_display_init();
 
     a_ok = bootloader_image_parse(APP_SLOT_A_ADDR, APP_SLOT_A_SIZE,
                                   APP_SLOT_A_ADDR, APP_SLOT_A_END, 1, &img_a);
