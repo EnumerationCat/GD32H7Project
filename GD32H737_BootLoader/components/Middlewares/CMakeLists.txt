@@ -307,4 +307,5 @@ target_sources(${PROJECT_NAME} PRIVATE
 
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/user_home/user_home.c"
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/app_shell/app_shell.c"
+	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI_APP/app_shell/app_shell_cmd.c"
 )

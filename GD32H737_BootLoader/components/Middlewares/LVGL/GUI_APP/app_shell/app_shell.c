@@ -1,11 +1,11 @@
 #include "app_shell.h"
+#include "app_shell_cmd.h"
 #include "lv_btn.h"
 #include "lv_disp.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include <string.h>
 #include <stdio.h>
-#include "gd32h7xx.h"
 
 #define APP_SHELL_LOG_SIZE   1024
 #define APP_SHELL_CMD_MAX    64
@@ -48,8 +48,12 @@ static void app_shell_log_puts(const char *s)
 }
 
 /* 同时输出到串口和页面日志 */
-static void app_shell_out(const char *s)
+void app_shell_putstr(const char *s)
 {
+    if(NULL == s) {
+        return;
+    }
+
     taskENTER_CRITICAL();
     app_shell_log_puts(s);
     s_log[s_log_len] = '\0';
@@ -59,51 +63,13 @@ static void app_shell_out(const char *s)
     printf("%s", s);
 }
 
-static int app_shell_streq(const char *line, const char *cmd)
+void app_shell_clear(void)
 {
-    uint32_t n = (uint32_t)strlen(cmd);
-
-    if(0 != strncmp(line, cmd, n)) {
-        return 0;
-    }
-
-    /* 命令名之后只允许空白 */
-    while((' ' == line[n]) || ('\t' == line[n])) {
-        n++;
-    }
-
-    return ('\0' == line[n]);
-}
-
-static void app_shell_exec(const char *line)
-{
-    while((' ' == *line) || ('\t' == *line)) {
-        line++;
-    }
-
-    if('\0' == *line) {
-        /* 空行：什么都不做，只补新提示符 */
-    } else if(app_shell_streq(line, "clear")) {
-        taskENTER_CRITICAL();
-        s_log_len = 0;
-        app_shell_log_puts(APP_SHELL_PROMPT);
-        s_log[s_log_len] = '\0';
-        s_log_version++;
-        taskEXIT_CRITICAL();
-
-        printf("\r\n%s", APP_SHELL_PROMPT);
-        return;
-    } else if(app_shell_streq(line, "reboot")) {
-        app_shell_out("[reboot] system reset\r\n");
-        NVIC_SystemReset();
-        return;
-    } else {
-        app_shell_out("unknown command: ");
-        app_shell_out(line);
-        app_shell_out("\r\n");
-    }
-
-    app_shell_out(APP_SHELL_PROMPT);
+    taskENTER_CRITICAL();
+    s_log_len = 0;
+    s_log[0] = '\0';
+    s_log_version++;
+    taskEXIT_CRITICAL();
 }
 
 /* 执行回车留下的一整行命令（在 LVGL 定时器里调用，可安全使用 printf） */
@@ -123,6 +89,7 @@ static void app_shell_run_pending(void)
     taskEXIT_CRITICAL();
 
     app_shell_exec(line);
+    app_shell_putstr(APP_SHELL_PROMPT);
 }
 
 /* 串口接收任务调用：把收到的字节追加到日志（\r\n 归一成单个换行），
@@ -226,14 +193,15 @@ static void app_shell_build(lv_obj_t *scr)
     lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
-    /* 右上角 BACK */
+    /* 右上角关闭按钮 */
     lv_obj_t *back = lv_btn_create(scr);
-    lv_obj_set_size(back, 70, 40);
+    lv_obj_set_size(back, 40, 40);
+    lv_obj_set_style_radius(back, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, -10, 10);
     lv_obj_add_event_cb(back, app_shell_back_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *back_label = lv_label_create(back);
-    lv_label_set_text(back_label, "BACK");
+    lv_label_set_text(back_label, "X");
     lv_obj_center(back_label);
 
     /* 串口日志显示区，可上下滚动 */
