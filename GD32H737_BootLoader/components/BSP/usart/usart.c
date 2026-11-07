@@ -44,9 +44,26 @@
 #define USART_DMA_REQUEST_RX            DMA_REQUEST_USART0_RX
 #define USART_DMA_REQUEST_TX            DMA_REQUEST_USART0_TX
 
+/* USART2 引脚和串口定义：PB10(TX) / PB11(RX)，中断方式收发 */
+#define USART2_TX_GPIO_PORT             GPIOB
+#define USART2_TX_GPIO_PIN              GPIO_PIN_10
+#define USART2_TX_GPIO_AF               GPIO_AF_7
+#define USART2_TX_GPIO_CLK              RCU_GPIOB   /* GPIOB时钟使能 */
+
+#define USART2_RX_GPIO_PORT             GPIOB
+#define USART2_RX_GPIO_PIN              GPIO_PIN_11
+#define USART2_RX_GPIO_AF               GPIO_AF_7
+#define USART2_RX_GPIO_CLK              RCU_GPIOB   /* GPIOB时钟使能 */
+
+#define USART2_UX                       USART2
+#define USART2_UX_IRQn                  USART2_IRQn
+#define USART2_UX_IRQHandler            USART2_IRQHandler
+#define USART2_UX_CLK                   RCU_USART2  /* USART2 时钟使能 */
+
 
 /* 设备是否已完成初始化（互斥锁/信号量/队列是否已建好） */
 static uint8_t g_uart_dev_ready = 0;
+static uint8_t g_uart2_dev_ready = 0;
 
 /* UART 句柄：外设基址 + 发送状态 */
 static UART_HandleTypeDef g_gd32_uart0_handle = {
@@ -67,6 +84,23 @@ static struct UART_Data   g_gd32_uart0_data = {
     &g_gd32_uart0_handle, NULL, NULL, NULL, {0}, 0
 };
 static struct UART_Device gd32_uart0;
+
+/* USART2 走纯中断收发，不需要 DMA 用的接收缓冲 */
+struct UART_Int_Data {
+    UART_HandleTypeDef *handle;
+    SemaphoreHandle_t   xTxSem;   /* 发送完成信号量 */
+    SemaphoreHandle_t   xTxMutex; /* 发送互斥锁 */
+    QueueHandle_t       xRxQueue; /* 接收队列，每项 1 字节 */
+};
+
+static UART_HandleTypeDef g_gd32_uart2_handle = {
+    USART2_UX, NULL, 0, 0
+};
+
+static struct UART_Int_Data g_gd32_uart2_data = {
+    &g_gd32_uart2_handle, NULL, NULL, NULL
+};
+static struct UART_Device gd32_uart2;
 
 
 #if USART_SUPPORT_PRINTF
@@ -189,6 +223,48 @@ void usart_init(uint32_t baudrate)
 }
 
 
+/**
+ * @brief       USART2 初始化函数（PB10/PB11，AF7），收发走中断
+ * @param       baudrate: 波特率
+ * @retval      无
+ */
+void usart2_init(uint32_t baudrate)
+{
+    struct UART_Int_Data *uart_data = gd32_uart2.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
+
+    /* IO 及 时钟配置 */
+    rcu_periph_clock_enable(USART2_TX_GPIO_CLK);     /* 使能串口TX脚时钟 */
+    rcu_periph_clock_enable(USART2_RX_GPIO_CLK);     /* 使能串口RX脚时钟 */
+    rcu_periph_clock_enable(USART2_UX_CLK);          /* 使能串口时钟 */
+
+    /* 设置USARTx_TX引脚的复用功能选择 */
+    gpio_af_set(USART2_TX_GPIO_PORT, USART2_TX_GPIO_AF, USART2_TX_GPIO_PIN);
+
+    /* 设置USARTx_RX引脚的复用功能选择 */
+    gpio_af_set(USART2_RX_GPIO_PORT, USART2_RX_GPIO_AF, USART2_RX_GPIO_PIN);
+
+    /* USARTx_TX引脚的模式设置 */
+    gpio_mode_set(USART2_TX_GPIO_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, USART2_TX_GPIO_PIN);
+    gpio_output_options_set(USART2_TX_GPIO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_100_220MHZ, USART2_TX_GPIO_PIN);
+
+    /* USARTx_RX引脚的模式设置 */
+    gpio_mode_set(USART2_RX_GPIO_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, USART2_RX_GPIO_PIN);
+    gpio_output_options_set(USART2_RX_GPIO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_100_220MHZ, USART2_RX_GPIO_PIN);
+
+    /* 配置USART的参数 */
+    usart_deinit(huart->Instance);                                 /* 复位USARTx */
+    usart_baudrate_set(huart->Instance, baudrate);                 /* 设置波特率 */
+    usart_stop_bit_set(huart->Instance, USART_STB_1BIT);           /* 一个停止位 */
+    usart_word_length_set(huart->Instance, USART_WL_8BIT);         /* 字长为8位数据格式 */
+    usart_parity_config(huart->Instance, USART_PM_NONE);           /* 无奇偶校验位 */
+    usart_transmit_config(huart->Instance, USART_TRANSMIT_ENABLE); /* 使能发送 */
+    usart_receive_config(huart->Instance, USART_RECEIVE_ENABLE);   /* 使能接收 */
+
+    usart_enable(huart->Instance);                                 /* 使能串口 */
+}
+
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 /*                        UART_Device 设备抽象                  */
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -197,6 +273,11 @@ static int gd32_uart_init(struct UART_Device *pDev, int baud, int datas, char pa
 static int gd32_uart_deinit(struct UART_Device *pDev);
 static int gd32_uart_send(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms);
 static int gd32_uart_recv(struct UART_Device *pDev, uint8_t *data, int timeout_ms);
+
+static int gd32_uart2_init(struct UART_Device *pDev, int baud, int datas, char parity, int stop);
+static int gd32_uart2_deinit(struct UART_Device *pDev);
+static int gd32_uart2_send(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms);
+static int gd32_uart2_recv(struct UART_Device *pDev, uint8_t *data, int timeout_ms);
 
 
 #if UART_DMA_MODE
@@ -340,6 +421,50 @@ void USART_UX_IRQHandler(void)
             xSemaphoreGiveFromISR(uart_data->xTxSem, &woken);
         }
 #endif
+        usart_flag_clear(huart->Instance, USART_FLAG_ORERR);
+    }
+
+    portYIELD_FROM_ISR(woken);
+}
+
+
+/* USART2 全局中断：RBNE 收一个字节入队，TBE 取下一个字节发送，TC 通知发送完成 */
+void USART2_UX_IRQHandler(void)
+{
+    struct UART_Int_Data *uart_data = gd32_uart2.priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
+    BaseType_t woken = pdFALSE;
+
+    if (g_uart2_dev_ready)
+    {
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_RBNE) != RESET)
+        {
+            uint8_t rxdata = (uint8_t)usart_data_receive(huart->Instance);
+            xQueueSendFromISR(uart_data->xRxQueue, &rxdata, &woken);
+        }
+
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_TBE) != RESET)
+        {
+            if (huart->TxXferCount > 0U)
+            {
+                usart_data_transmit(huart->Instance, *huart->pTxBuffPtr);
+                huart->pTxBuffPtr++;
+                huart->TxXferCount--;
+            }
+            if (0U == huart->TxXferCount)
+            {
+                usart_interrupt_disable(huart->Instance, USART_INT_TBE);
+                usart_interrupt_enable(huart->Instance, USART_INT_TC);
+            }
+        }
+
+        if (usart_interrupt_flag_get(huart->Instance, USART_INT_FLAG_TC) != RESET)
+        {
+            usart_interrupt_flag_clear(huart->Instance, USART_INT_FLAG_TC);
+            usart_interrupt_disable(huart->Instance, USART_INT_TC);
+            xSemaphoreGiveFromISR(uart_data->xTxSem, &woken);
+        }
+
         usart_flag_clear(huart->Instance, USART_FLAG_ORERR);
     }
 
@@ -593,6 +718,131 @@ static int gd32_uart_deinit(struct UART_Device *pDev)
 }
 
 
+static int gd32_uart2_init(struct UART_Device *pDev, int baud, int datas, char parity, int stop)
+{
+    struct UART_Int_Data *uart_data = pDev->priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
+
+    if (g_uart2_dev_ready)
+    {
+        return 0;
+    }
+
+    (void)datas;
+    (void)parity;
+    (void)stop;
+
+    usart2_init((uint32_t)baud);
+
+    uart_data->xTxMutex = xSemaphoreCreateMutex();
+    uart_data->xTxSem   = xSemaphoreCreateBinary();
+    uart_data->xRxQueue = xQueueCreate(UART_RX_QUEUE_LEN, 1);
+    if ((NULL == uart_data->xTxMutex) || (NULL == uart_data->xTxSem) || (NULL == uart_data->xRxQueue))
+    {
+        return -1;
+    }
+
+    usart_interrupt_disable(huart->Instance, USART_INT_RBNE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TBE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TC);
+    usart_flag_clear(huart->Instance, USART_FLAG_TC);
+
+    /* 优先级数值必须 >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY(5)，才能调用 FromISR API */
+    nvic_irq_enable(USART2_UX_IRQn, 6, 0);
+
+    g_uart2_dev_ready = 1;
+    usart_interrupt_enable(huart->Instance, USART_INT_RBNE);
+
+    return 0;
+}
+
+static int gd32_uart2_send(struct UART_Device *pDev, uint8_t *datas, int len, int timeout_ms)
+{
+    struct UART_Int_Data *uart_data = pDev->priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
+
+    /* 加互斥锁，避免多任务同时发送 */
+    if (pdTRUE != xSemaphoreTake(uart_data->xTxMutex, (TickType_t)timeout_ms))
+    {
+        return -1;
+    }
+
+    /* 清掉可能残留的发送完成信号量 */
+    xSemaphoreTake(uart_data->xTxSem, 0);
+
+    usart_flag_clear(huart->Instance, USART_FLAG_TC);
+    huart->pTxBuffPtr  = datas;
+    huart->TxXferSize  = (uint16_t)len;
+    huart->TxXferCount = (uint16_t)len;
+    usart_interrupt_enable(huart->Instance, USART_INT_TBE);
+
+    /* 等待发送完毕 */
+    if (pdTRUE == xSemaphoreTake(uart_data->xTxSem, (TickType_t)timeout_ms))
+    {
+        xSemaphoreGive(uart_data->xTxMutex);
+        return 0;
+    }
+
+    /* 超时：中止本次发送 */
+    usart_interrupt_disable(huart->Instance, USART_INT_TBE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TC);
+    xSemaphoreTake(uart_data->xTxSem, 0);
+    xSemaphoreGive(uart_data->xTxMutex);
+    return -1;
+}
+
+static int gd32_uart2_recv(struct UART_Device *pDev, uint8_t *data, int timeout_ms)
+{
+    struct UART_Int_Data *uart_data = pDev->priv_data;
+
+    /* 中断里写队列，这里从队列取数据；timeout_ms 直接作为 tick 使用 */
+    if (pdPASS == xQueueReceive(uart_data->xRxQueue, data, (TickType_t)timeout_ms))
+    {
+        return 0;
+    }
+    return -1;
+}
+
+static int gd32_uart2_deinit(struct UART_Device *pDev)
+{
+    struct UART_Int_Data *uart_data = pDev->priv_data;
+    UART_HandleTypeDef *huart = uart_data->handle;
+
+    /* 先关中断源和 NVIC，保证下面拆对象时没有 ISR 再来访问 */
+    usart_interrupt_disable(huart->Instance, USART_INT_RBNE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TBE);
+    usart_interrupt_disable(huart->Instance, USART_INT_TC);
+    nvic_irq_disable(USART2_UX_IRQn);
+
+    usart_deinit(huart->Instance);
+
+    g_uart2_dev_ready = 0;
+
+    /* 释放 RTOS 对象：调用前须确保没有任务阻塞在 Send/Recv 上 */
+    if (NULL != uart_data->xTxSem)
+    {
+        vSemaphoreDelete(uart_data->xTxSem);
+        uart_data->xTxSem = NULL;
+    }
+    if (NULL != uart_data->xRxQueue)
+    {
+        vQueueDelete(uart_data->xRxQueue);
+        uart_data->xRxQueue = NULL;
+    }
+    if (NULL != uart_data->xTxMutex)
+    {
+        vSemaphoreDelete(uart_data->xTxMutex);
+        uart_data->xTxMutex = NULL;
+    }
+
+    huart->pTxBuffPtr  = NULL;
+    huart->TxXferSize  = 0;
+    huart->TxXferCount = 0;
+
+    return 0;
+}
+
+
 static struct UART_Device gd32_uart0 = {
     "gd32_uart0",
     gd32_uart_init,
@@ -602,8 +852,18 @@ static struct UART_Device gd32_uart0 = {
     &g_gd32_uart0_data
 };
 
+static struct UART_Device gd32_uart2 = {
+    "gd32_uart2",
+    gd32_uart2_init,
+    gd32_uart2_deinit,
+    gd32_uart2_send,
+    gd32_uart2_recv,
+    &g_gd32_uart2_data
+};
+
 static struct UART_Device *g_uart_devs[] = {
-    &gd32_uart0
+    &gd32_uart0,
+    &gd32_uart2
 };
 
 struct UART_Device *GetUARTDevice(char *name)
