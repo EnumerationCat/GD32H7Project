@@ -22,6 +22,7 @@ static uint32_t s_log_len = 0;
 static volatile uint32_t s_log_version = 0;
 static uint32_t s_shown_version = 0;
 static char s_tmp[APP_SHELL_LOG_SIZE + 1];
+static volatile int s_follow_bottom = 1;   /* 有本地输入时滚回最新位置 */
 
 /* 当前正在输入的一行命令，回车后由刷新定时器执行 */
 static char s_cmd[APP_SHELL_CMD_MAX + 1];
@@ -178,6 +179,7 @@ static void app_shell_history_recall(int index)
     }
     s_log[s_log_len] = '\0';
     s_log_version++;
+    s_follow_bottom = 1;
 
     taskEXIT_CRITICAL();
 
@@ -296,6 +298,10 @@ void app_shell_rx_push(const uint8_t *data, uint32_t size)
             }
         }
 
+        if(APP_SHELL_ECHO_NONE != echo) {
+            s_follow_bottom = 1;
+        }
+
         s_log[s_log_len] = '\0';
         s_log_version++;
         taskEXIT_CRITICAL();
@@ -321,6 +327,7 @@ static void app_shell_refresh_cb(lv_timer_t *timer)
 {
     uint32_t len;
     int changed = 0;
+    int follow;
 
     (void)timer;
 
@@ -341,20 +348,32 @@ static void app_shell_refresh_cb(lv_timer_t *timer)
         s_shown_version = s_log_version;
         changed = 1;
     }
+    /* 本地输入（回显/回车/历史命令）时强制跟随最新，屏幕输出则只在已处
+       底部时跟随，否则会把正在往回翻看的用户拽回底部 */
+    follow = s_follow_bottom;
+    s_follow_bottom = 0;
     taskEXIT_CRITICAL();
 
     if(0 == changed) {
         return;
     }
 
-    lv_label_set_text(log_label, s_tmp);
+    if(0 == follow) {
+        follow = (lv_obj_get_scroll_bottom(log_cont) <= 2);
+    }
+
+    /* 静态文本：set_text 每次都会 free + malloc 一整段文本，堆紧张时
+       LV_ASSERT_MALLOC 会死循环（表现为偶尔卡死），静态文本不复制不分配 */
+    lv_label_set_text_static(log_label, s_tmp);
     lv_obj_update_layout(log_cont);
 
-    /* scroll_bottom 是“还能向下滚多少”，要加到当前 scroll_y 上才是绝对目标位置；
-       直接把它当绝对位置会在顶部/底部之间来回跳，表现为屏幕上下来回抖 */
-    lv_obj_scroll_to_y(log_cont,
-                       lv_obj_get_scroll_y(log_cont) + lv_obj_get_scroll_bottom(log_cont),
-                       LV_ANIM_OFF);
+    if(follow) {
+        /* scroll_bottom 是“还能向下滚多少”，要加到当前 scroll_y 上才是绝对目标位置；
+           直接把它当绝对位置会在顶部/底部之间来回跳，表现为屏幕上下来回抖 */
+        lv_obj_scroll_to_y(log_cont,
+                           lv_obj_get_scroll_y(log_cont) + lv_obj_get_scroll_bottom(log_cont),
+                           LV_ANIM_OFF);
+    }
 }
 
 static void app_shell_back_cb(lv_event_t *e)
@@ -390,12 +409,14 @@ static void app_shell_build(lv_obj_t *scr)
     lv_obj_set_style_border_width(log_cont, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(log_cont, 6, LV_PART_MAIN);
     lv_obj_set_scroll_dir(log_cont, LV_DIR_VER);
+    /* 去掉惯性/回弹：手指离开后不再继续滚动和重绘，滑动时 CPU 占用明显降低 */
+    lv_obj_clear_flag(log_cont, LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_ELASTIC);
 
     log_label = lv_label_create(log_cont);
     lv_obj_set_width(log_label, lv_pct(100));
     lv_label_set_long_mode(log_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(log_label, lv_color_white(), LV_PART_MAIN);
-    lv_label_set_text(log_label, "");
+    lv_label_set_text_static(log_label, "");
 
     /* 首次进入时给出命令行提示符 */
     {
