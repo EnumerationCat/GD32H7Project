@@ -44,16 +44,17 @@
 #define USART_DMA_REQUEST_RX            DMA_REQUEST_USART0_RX
 #define USART_DMA_REQUEST_TX            DMA_REQUEST_USART0_TX
 
-/* USART2 引脚和串口定义：PB10(TX) / PB11(RX)，中断方式收发 */
-#define USART2_TX_GPIO_PORT             GPIOB
+/* USART2 引脚和串口定义：PC10(TX) / PC11(RX)，中断方式收发
+ * 注意：PB10/PB11 已被 QSPI Flash 片选和触摸屏时钟占用，不能复用为串口 */
+#define USART2_TX_GPIO_PORT             GPIOC
 #define USART2_TX_GPIO_PIN              GPIO_PIN_10
 #define USART2_TX_GPIO_AF               GPIO_AF_7
-#define USART2_TX_GPIO_CLK              RCU_GPIOB   /* GPIOB时钟使能 */
+#define USART2_TX_GPIO_CLK              RCU_GPIOC   /* GPIOC时钟使能 */
 
-#define USART2_RX_GPIO_PORT             GPIOB
+#define USART2_RX_GPIO_PORT             GPIOC
 #define USART2_RX_GPIO_PIN              GPIO_PIN_11
 #define USART2_RX_GPIO_AF               GPIO_AF_7
-#define USART2_RX_GPIO_CLK              RCU_GPIOB   /* GPIOB时钟使能 */
+#define USART2_RX_GPIO_CLK              RCU_GPIOC   /* GPIOC时钟使能 */
 
 #define USART2_UX                       USART2
 #define USART2_UX_IRQn                  USART2_IRQn
@@ -224,7 +225,7 @@ void usart_init(uint32_t baudrate)
 
 
 /**
- * @brief       USART2 初始化函数（PB10/PB11，AF7），收发走中断
+ * @brief       USART2 初始化函数（PC10/PC11，AF7），收发走中断
  * @param       baudrate: 波特率
  * @retval      无
  */

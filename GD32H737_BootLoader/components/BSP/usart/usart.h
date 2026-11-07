@@ -47,7 +47,7 @@
 /*******************************************************************************************************/
 
 void usart_init(uint32_t baudrate);                 /* 串口初始化函数 */
-void usart2_init(uint32_t baudrate);                /* USART2 初始化函数（PB10/PB11，中断收发） */
+void usart2_init(uint32_t baudrate);                /* USART2 初始化函数（PC10/PC11，中断收发） */
 
 /* GD32 版 UART 句柄：SPL 没有 HAL 句柄，发送状态只能自己存。
    字段对应 STM32 HAL 的 UART_HandleTypeDef（pTxBuffPtr / TxXferSize / TxXferCount） */

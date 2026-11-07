@@ -55,6 +55,12 @@ int main(void)
     {
         uart_dev->Init(uart_dev, 115200, 8, 'N', 1);
     }
+	struct UART_Device *uart_dev2 = GetUARTDevice("gd32_uart2");
+	if (NULL != uart_dev2)
+    {
+        uart_dev2->Init(uart_dev2, 115200, 8, 'N', 1);
+    }
+
 	printf("SystemCoreClock: %lu Hz\r\n", SystemCoreClock);
     led_init();							                /* 初始化LED */
 	norflash_init();
