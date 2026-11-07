@@ -99,6 +99,49 @@ void app_shell_clear(void)
     taskEXIT_CRITICAL();
 }
 
+/* 进入页面时重置控制台：清空日志、丢弃未输完的命令，重新给出提示符 */
+static void app_shell_reset_console(void)
+{
+    taskENTER_CRITICAL();
+    s_log_len = 0;
+    s_log[0] = '\0';
+    s_shell.line[0] = '\0';
+    s_shell.line_position = 0U;
+    s_shell.line_curpos = 0U;
+    s_shell.current_history = s_shell.history_count;
+    s_shell.stat = WAIT_NORMAL;
+    s_cmd_ready = 0;
+    app_shell_log_puts(APP_SHELL_PROMPT);
+    s_log[s_log_len] = '\0';
+    s_log_version++;
+    s_follow_bottom = 1;
+    taskEXIT_CRITICAL();
+
+    printf("\r\n" APP_SHELL_PROMPT);
+}
+
+/* 日志有更新时把最新内容拷到 s_tmp，返回 1 */
+static int app_shell_capture(void)
+{
+    uint32_t len;
+    int changed = 0;
+
+    taskENTER_CRITICAL();
+    if(s_log_version != s_shown_version) {
+        len = s_log_len;
+        if(len > APP_SHELL_LOG_SIZE) {
+            len = APP_SHELL_LOG_SIZE;
+        }
+        memcpy(s_tmp, s_log, len);
+        s_tmp[len] = '\0';
+        s_shown_version = s_log_version;
+        changed = 1;
+    }
+    taskEXIT_CRITICAL();
+
+    return changed;
+}
+
 /* 执行回车留下的一整行命令（在 LVGL 定时器里调用，可安全使用 printf） */
 static void app_shell_run_pending(void)
 {
@@ -403,8 +446,6 @@ void app_shell_rx_push(const uint8_t *data, uint32_t size)
 
 static void app_shell_refresh_cb(lv_timer_t *timer)
 {
-    uint32_t len;
-    int changed = 0;
     int follow;
 
     (void)timer;
@@ -415,24 +456,14 @@ static void app_shell_refresh_cb(lv_timer_t *timer)
         return;
     }
 
-    taskENTER_CRITICAL();
-    if(s_log_version != s_shown_version) {
-        len = s_log_len;
-        if(len > APP_SHELL_LOG_SIZE) {
-            len = APP_SHELL_LOG_SIZE;
-        }
-        memcpy(s_tmp, s_log, len);
-        s_tmp[len] = '\0';
-        s_shown_version = s_log_version;
-        changed = 1;
-    }
     /* 本地输入（回显/回车/历史命令）时强制跟随最新，屏幕输出则只在已处
        底部时跟随，否则会把正在往回翻看的用户拽回底部 */
+    taskENTER_CRITICAL();
     follow = s_follow_bottom;
     s_follow_bottom = 0;
     taskEXIT_CRITICAL();
 
-    if(0 == changed) {
+    if(0 == app_shell_capture()) {
         return;
     }
 
@@ -496,24 +527,6 @@ static void app_shell_build(lv_obj_t *scr)
     lv_obj_set_style_text_color(log_label, lv_color_white(), LV_PART_MAIN);
     lv_label_set_text_static(log_label, "");
 
-    /* 首次进入时给出命令行提示符 */
-    {
-        int need_nl;
-
-        taskENTER_CRITICAL();
-        need_nl = ((s_log_len > 0U) && ('\n' != s_log[s_log_len - 1U]));
-        if(need_nl) {
-            app_shell_log_putc('\n');
-        }
-        app_shell_log_puts(APP_SHELL_PROMPT);
-        s_log[s_log_len] = '\0';
-        s_log_version++;
-        taskEXIT_CRITICAL();
-
-        printf(need_nl ? "\r\n" : "");
-        printf(APP_SHELL_PROMPT);
-    }
-
     refresh_timer = lv_timer_create(app_shell_refresh_cb, 200, NULL);
 }
 
@@ -527,5 +540,14 @@ void app_shell(void)
         app_shell_build(shell_screen);
     }
 
+    /* 每次进入都清空上一次的内容，只显示一个新的提示符 */
+    app_shell_reset_console();
+
     lv_scr_load(shell_screen);
+
+    if(0 != app_shell_capture()) {
+        lv_label_set_text_static(log_label, s_tmp);
+        lv_obj_update_layout(log_cont);
+        lv_obj_scroll_to_y(log_cont, 0, LV_ANIM_OFF);
+    }
 }
