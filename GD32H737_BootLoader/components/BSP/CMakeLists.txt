@@ -12,6 +12,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 	"${CMAKE_CURRENT_LIST_DIR}/qspi"
 	"${CMAKE_CURRENT_LIST_DIR}/norflash"
+	"${CMAKE_CURRENT_LIST_DIR}/sdcard"
 
 
 	"${CMAKE_CURRENT_LIST_DIR}/lcd"
@@ -36,6 +37,8 @@ target_sources(${PROJECT_NAME} PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/lcd/lcd_ex.c"
 	"${CMAKE_CURRENT_LIST_DIR}/qspi/qspi.c"
 	"${CMAKE_CURRENT_LIST_DIR}/norflash/norflash.c"
+	"${CMAKE_CURRENT_LIST_DIR}/sdcard/sd_conf.c"
+	"${CMAKE_CURRENT_LIST_DIR}/sdcard/sdio_sdcard.c"
 	"${CMAKE_CURRENT_LIST_DIR}/lcd/ctiic.c"
 	"${CMAKE_CURRENT_LIST_DIR}/lcd/gt9xxx.c"
 	"${CMAKE_CURRENT_LIST_DIR}/lcd/touch.c"

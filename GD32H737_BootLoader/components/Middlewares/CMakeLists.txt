@@ -9,6 +9,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/portable/GCC/ARM_CM7/r0p1"
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/config"
 
+	"${CMAKE_CURRENT_LIST_DIR}/FatFs"
+
 
 
 	"${CMAKE_CURRENT_LIST_DIR}/LVGL/GUI"
@@ -50,6 +52,12 @@ target_sources(${PROJECT_NAME} PRIVATE
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/source/timers.c"
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/portable/GCC/ARM_CM7/r0p1/port.c"
 	"${CMAKE_CURRENT_LIST_DIR}/FreeRtos/portable/MemMang/heap_4.c"
+
+	# FatFs (diskio.c glues SD card + NOR flash)
+	"${CMAKE_CURRENT_LIST_DIR}/FatFs/ff.c"
+	"${CMAKE_CURRENT_LIST_DIR}/FatFs/ffunicode.c"
+	"${CMAKE_CURRENT_LIST_DIR}/FatFs/ffsystem.c"
+	"${CMAKE_CURRENT_LIST_DIR}/FatFs/diskio.c"
 
 
 

@@ -19,6 +19,8 @@
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
 #include "norflash.h"
+#include "ff.h"
+#include <string.h>
 // #include "lv_demo_widgets.h"
 // #include "lv_demo_stress.h"
 // #include "lv_demo_music.h"
@@ -51,7 +53,7 @@ int main(void)
        （configASSERT 是关中断死循环），必须在任何 nvic_irq_enable 之前设置好 */
     nvic_priority_group_set(NVIC_PRIGROUP_PRE4_SUB0);
 
-    delay_init(600);                        /* 延时初始化 */
+    delay_init(300);                        /* 延时初始化 */
 
     /* 串口统一走 UART_Device：Init 内部完成 GPIO/USART/DMA/中断配置 */
     struct UART_Device *uart_dev = GetUARTDevice("gd32_uart0");
@@ -164,6 +166,17 @@ TaskHandle_t uart_taskHandle;
 void uart_task(void * pvParameters);
 
 
+/* FatFs 验证任务的配置 */
+#define FATFS_TEST_STACK        2048
+#define FATFS_TEST_PRIORITY     5
+#define FATFS_TEST_SIZE         4096
+#define FATFS_TEST_NOR_FORMAT   1       /* NOR 无文件系统时自动格式化（量产时会清空整片） */
+#define FATFS_TEST_SD_FORMAT    0       /* SD 卡不自动格式化，避免误删用户数据 */
+#define FATFS_TEST_KEEP_FILE    0       /* 验证后删除测试文件 */
+TaskHandle_t fatfs_test_TaskHandle;
+void fatfs_test_task(void * pvParameters);
+
+
 
 
 
@@ -222,6 +235,15 @@ void start_Task(void * pvParameters)
 		 (void *) NULL,//传递给任务函数的参数
 		 (UBaseType_t) UART_TASK_PRIORITY,//任务优先级
 		 (TaskHandle_t *) &uart_taskHandle//任务句柄的地址
+
+		);
+
+	xTaskCreate((TaskFunction_t) fatfs_test_task,//任务函数的地址
+		 (char *) "fatfs_test",//任务名字
+		 (configSTACK_DEPTH_TYPE) FATFS_TEST_STACK,//任务堆栈大小
+		 (void *) NULL,//传递给任务函数的参数
+		 (UBaseType_t) FATFS_TEST_PRIORITY,//任务优先级
+		 (TaskHandle_t *) &fatfs_test_TaskHandle//任务句柄的地址
 
 		);
 
@@ -309,6 +331,135 @@ void uart_task(void * pvParameters)
             } while (0 == uart_dev->Recv(uart_dev, &data, 0));
         }
     }
+}
+
+
+/*======================= FatFs 验证任务 =======================*/
+
+static const char *fatfs_result_str(FRESULT res)
+{
+    switch (res)
+    {
+        case FR_OK:                 return "OK";
+        case FR_DISK_ERR:           return "DISK_ERR";
+        case FR_INT_ERR:            return "INT_ERR";
+        case FR_NOT_READY:          return "NOT_READY";
+        case FR_NO_FILE:            return "NO_FILE";
+        case FR_NO_PATH:            return "NO_PATH";
+        case FR_INVALID_NAME:       return "INVALID_NAME";
+        case FR_DENIED:             return "DENIED";
+        case FR_EXIST:              return "EXIST";
+        case FR_INVALID_OBJECT:     return "INVALID_OBJECT";
+        case FR_WRITE_PROTECTED:    return "WRITE_PROTECTED";
+        case FR_INVALID_DRIVE:      return "INVALID_DRIVE";
+        case FR_NOT_ENABLED:        return "NOT_ENABLED";
+        case FR_NO_FILESYSTEM:      return "NO_FILESYSTEM";
+        case FR_MKFS_ABORTED:       return "MKFS_ABORTED";
+        case FR_TIMEOUT:            return "TIMEOUT";
+        case FR_LOCKED:             return "LOCKED";
+        case FR_NOT_ENOUGH_CORE:    return "NOT_ENOUGH_CORE";
+        case FR_TOO_MANY_OPEN_FILES:return "TOO_MANY_OPEN_FILES";
+        case FR_INVALID_PARAMETER:  return "INVALID_PARAMETER";
+        default:                    return "UNKNOWN";
+    }
+}
+
+/* 挂载一个卷，写入测试文件再读回比较 */
+static void fatfs_volume_test(const TCHAR *drive, const TCHAR *path, int allow_format)
+{
+    static FATFS fs;
+    static BYTE work[512] __attribute__((aligned(4)));
+    static uint8_t wbuf[FATFS_TEST_SIZE] __attribute__((aligned(4)));
+    static uint8_t rbuf[FATFS_TEST_SIZE] __attribute__((aligned(4)));
+    FIL fil;
+    FRESULT res;
+    UINT bw = 0, br = 0, i;
+    DWORD free_clust = 0;
+    FATFS *pfs = NULL;
+
+    printf("\r\n--- %s ---\r\n", drive);
+
+    res = f_mount(&fs, drive, 1);
+    if ((res == FR_NO_FILESYSTEM) && allow_format)
+    {
+        printf("%s no filesystem, formatting...\r\n", drive);
+        res = f_mkfs(drive, NULL, work, sizeof(work));
+        printf("f_mkfs: %s\r\n", fatfs_result_str(res));
+        if (res == FR_OK)
+        {
+            res = f_mount(&fs, drive, 1);
+        }
+    }
+    if (res != FR_OK)
+    {
+        printf("%s mount failed: %s\r\n", drive, fatfs_result_str(res));
+        return;
+    }
+
+    if (f_getfree(drive, &free_clust, &pfs) == FR_OK)
+    {
+        printf("%s total %lu KB, free %lu KB\r\n", drive,
+               (unsigned long)((uint32_t)(pfs->n_fatent - 2U) * pfs->csize / 2U),
+               (unsigned long)((uint32_t)free_clust * pfs->csize / 2U));
+    }
+
+    for (i = 0; i < FATFS_TEST_SIZE; i++)
+    {
+        wbuf[i] = (uint8_t)(i * 7U + 0xA5U);
+    }
+
+    res = f_open(&fil, path, FA_CREATE_ALWAYS | FA_WRITE);
+    if (res == FR_OK)
+    {
+        res = f_write(&fil, wbuf, FATFS_TEST_SIZE, &bw);
+        f_close(&fil);
+    }
+    if ((res != FR_OK) || (bw != FATFS_TEST_SIZE))
+    {
+        printf("%s write failed: %s (wrote %u/%u)\r\n", drive,
+               fatfs_result_str(res), (unsigned)bw, (unsigned)FATFS_TEST_SIZE);
+        goto out;
+    }
+
+    memset(rbuf, 0, sizeof(rbuf));
+    res = f_open(&fil, path, FA_READ);
+    if (res == FR_OK)
+    {
+        res = f_read(&fil, rbuf, FATFS_TEST_SIZE, &br);
+        f_close(&fil);
+    }
+    if ((res != FR_OK) || (br != FATFS_TEST_SIZE))
+    {
+        printf("%s read failed: %s (read %u/%u)\r\n", drive,
+               fatfs_result_str(res), (unsigned)br, (unsigned)FATFS_TEST_SIZE);
+        goto out;
+    }
+
+    if (memcmp(wbuf, rbuf, FATFS_TEST_SIZE) == 0)
+    {
+        printf("%s r/w verify PASS (%u bytes)\r\n", drive, (unsigned)FATFS_TEST_SIZE);
+    }
+    else
+    {
+        printf("%s r/w verify FAIL (data mismatch)\r\n", drive);
+    }
+
+out:
+#if !FATFS_TEST_KEEP_FILE
+    f_unlink(path);
+#endif
+    f_mount(NULL, drive, 0);
+}
+
+void fatfs_test_task(void *pvParameters)
+{
+    printf("\r\n===== FatFs verification start =====\r\n");
+
+    fatfs_volume_test("0:", "0:/fatfs_test.bin", FATFS_TEST_NOR_FORMAT);   /* NOR Flash */
+    fatfs_volume_test("1:", "1:/fatfs_test.bin", FATFS_TEST_SD_FORMAT);    /* SD card */
+
+    printf("===== FatFs verification done =====\r\n");
+    vTaskDelete(NULL);
 }
 
 
